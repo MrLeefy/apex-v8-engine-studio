@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Apex-V8 Twin-Turbo | 3D Engine Studio & Dyno Simulator</title>
+  <title>2006 Chevrolet Tahoe 5.3L Vortec 5300 | 3D Engine Studio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,232 +12,129 @@
 <body>
   <div id="canvas-container"></div>
 
-  <!-- Main Top Header -->
   <header class="app-header">
     <div class="brand-badge">
-      <div class="brand-logo">
-        <span class="logo-icon">⚡</span>
-      </div>
+      <div class="brand-logo"><span class="logo-icon">⚙</span></div>
       <div class="brand-text">
-        <span class="brand-title">APEX-V8 <span class="brand-accent">5.0L TWIN-TURBO</span></span>
-        <span class="brand-subtitle">CAD RACING ENGINE PLATFORM & DYNO BENCH</span>
+        <span class="brand-title">TAHOE 5.3 <span class="brand-accent">VORTEC 5300</span></span>
+        <span class="brand-subtitle">2006 GMT800 • GEN III L59 / LM7 ENGINE STUDIO</span>
       </div>
     </div>
 
-    <!-- Mode Selector Tabs -->
     <div class="mode-tabs">
-      <button class="mode-tab active" id="tab-inspect" data-mode="inspect">
-        <span class="tab-dot"></span>
-        <span class="tab-label">3D INSPECTOR</span>
-      </button>
-      <button class="mode-tab" id="tab-exploded" data-mode="exploded">
-        <span class="tab-icon">🧩</span>
-        <span class="tab-label">EXPLODED X-RAY</span>
-      </button>
-      <button class="mode-tab" id="tab-dyno" data-mode="dyno">
-        <span class="tab-icon">🔥</span>
-        <span class="tab-label">DYNO BENCH</span>
-      </button>
+      <button class="mode-tab active" id="tab-inspect" data-mode="inspect"><span class="tab-dot"></span><span class="tab-label">3D INSPECTOR</span></button>
+      <button class="mode-tab" id="tab-exploded" data-mode="exploded"><span class="tab-icon">🧩</span><span class="tab-label">EXPLODED X-RAY</span></button>
+      <button class="mode-tab" id="tab-dyno" data-mode="dyno"><span class="tab-icon">⚙</span><span class="tab-label">RUNNING ENGINE</span></button>
     </div>
 
-    <!-- Header Actions Pill -->
     <div class="header-status-pill">
-      <button id="btn-xray-toggle" class="icon-toggle" title="Toggle Translucent Ghost X-Ray Mode">
-        <span style="font-size: 12px; font-weight: 700;">X-RAY</span>
-      </button>
-      <button id="btn-snapshot" class="icon-toggle" title="Capture 4K Studio Snapshot">
-        <span style="font-size: 13px;">📸</span>
-      </button>
+      <button id="btn-xray-toggle" class="icon-toggle" title="Toggle translucent cutaway mode"><span style="font-size:12px;font-weight:700;">X-RAY</span></button>
+      <button id="btn-snapshot" class="icon-toggle" title="Capture studio snapshot"><span style="font-size:13px;">📸</span></button>
       <div class="status-indicator live"></div>
-      <span class="status-text" id="header-status">STUDIO ACTIVE • 60 FPS</span>
-      <button id="btn-sound" class="icon-toggle active" title="Toggle Acoustic Sound Engine">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-        </svg>
-      </button>
+      <span class="status-text" id="header-status">2006 TAHOE 5.3 • MODEL ACTIVE</span>
+      <button id="btn-sound" class="icon-toggle active" title="Toggle V8 sound"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
     </div>
   </header>
 
-  <!-- Top Floating Viewport Control Bar -->
   <div class="viewport-control-bar glass-panel">
     <div class="vp-item">
       <span class="vp-label">VIEW:</span>
       <select id="view-preset-select" class="custom-select">
-        <option value="isometric">Isometric 3/4</option>
-        <option value="front">Front Timing Drive</option>
-        <option value="top">Top Intake Plenum</option>
-        <option value="side">Side Turbos & Headers</option>
-        <option value="macro">Macro Piston Bore</option>
-        <option value="rear">Rear Flywheel Drivetrain</option>
+        <option value="isometric">Isometric Complete Engine</option>
+        <option value="front">Front Accessory Drive</option>
+        <option value="top">Top Intake / Valley</option>
+        <option value="side">Stock Exhaust / Head Side</option>
+        <option value="macro">Crank / Piston Cutaway</option>
+        <option value="rear">Rear Flexplate / Starter</option>
       </select>
     </div>
-
     <div class="vp-divider"></div>
-
     <div class="vp-item exploded-slider-wrap">
       <span class="vp-label">EXPLODED VIEW:</span>
       <input type="range" id="exploded-slider" min="0" max="100" step="1" value="0" class="custom-range" />
       <span class="vp-value" id="exploded-val">0%</span>
     </div>
-
     <div class="vp-divider"></div>
-
-    <div class="vp-item">
-      <button class="btn-pill" id="btn-wireframe-toggle">WIREFRAME</button>
-      <button class="btn-pill" id="btn-reset-view">RESET CAM</button>
-    </div>
+    <div class="vp-item"><button class="btn-pill" id="btn-wireframe-toggle">WIREFRAME</button><button class="btn-pill" id="btn-reset-view">RESET CAM</button></div>
   </div>
 
-  <!-- Left Floating Telemetry HUD -->
   <aside class="hud-panel hud-left">
-    <!-- Engine Technical Specifications -->
     <div class="hud-card glass-panel">
-      <div class="card-header">
-        <span class="card-title">ENGINE SPECIFICATIONS</span>
-        <span class="card-tag">5.0L TWIN-TURBO</span>
-      </div>
-
+      <div class="card-header"><span class="card-title">ENGINE SPECIFICATIONS</span><span class="card-tag">L59 / VIN Z DEFAULT</span></div>
       <div class="specs-grid">
-        <div class="spec-row">
-          <span class="spec-k">CONFIGURATION</span>
-          <span class="spec-v">90° V8 DOHC 32V</span>
-        </div>
-        <div class="spec-row">
-          <span class="spec-k">DISPLACEMENT</span>
-          <span class="spec-v">5,038 cc (307.4 cu in)</span>
-        </div>
-        <div class="spec-row">
-          <span class="spec-k">BORE × STROKE</span>
-          <span class="spec-v">93.0 mm × 92.7 mm</span>
-        </div>
-        <div class="spec-row">
-          <span class="spec-k">COMPRESSION</span>
-          <span class="spec-v">9.8:1 Boost Ratio</span>
-        </div>
-        <div class="spec-row">
-          <span class="spec-k">PEAK POWER</span>
-          <span class="spec-v accent">1,150 HP @ 7,800 RPM</span>
-        </div>
-        <div class="spec-row">
-          <span class="spec-k">PEAK TORQUE</span>
-          <span class="spec-v accent">890 lb-ft @ 4,200 RPM</span>
-        </div>
-        <div class="spec-row">
-          <span class="spec-k">BOOST PRESSURE</span>
-          <span class="spec-v">2.5 Bar (36.3 PSI)</span>
-        </div>
-        <div class="spec-row">
-          <span class="spec-k">REDLINE</span>
-          <span class="spec-v">8,500 RPM</span>
-        </div>
+        <div class="spec-row"><span class="spec-k">APPLICATION</span><span class="spec-v">2006 Tahoe GMT800</span></div>
+        <div class="spec-row"><span class="spec-k">CONFIGURATION</span><span class="spec-v">90° OHV V8 • 16 valves</span></div>
+        <div class="spec-row"><span class="spec-k">DISPLACEMENT</span><span class="spec-v">5,328 cc / 325 CID</span></div>
+        <div class="spec-row"><span class="spec-k">BORE × STROKE</span><span class="spec-v">96.0 × 92.0 mm</span></div>
+        <div class="spec-row"><span class="spec-k">BORE SPACING</span><span class="spec-v">4.400 in</span></div>
+        <div class="spec-row"><span class="spec-k">DECK HEIGHT</span><span class="spec-v">9.240 in nominal</span></div>
+        <div class="spec-row"><span class="spec-k">COMPRESSION</span><span class="spec-v">9.5:1</span></div>
+        <div class="spec-row"><span class="spec-k">FIRING ORDER</span><span class="spec-v">1-8-7-2-6-5-4-3</span></div>
+        <div class="spec-row"><span class="spec-k">FACTORY OUTPUT</span><span class="spec-v accent">295 HP @ 5,200 RPM</span></div>
+        <div class="spec-row"><span class="spec-k">FACTORY TORQUE</span><span class="spec-v accent">335 LB-FT @ 4,000 RPM</span></div>
+        <div class="spec-row"><span class="spec-k">FUEL / RPO</span><span class="spec-v">L59 Z: Gas / E85</span></div>
       </div>
-
-      <!-- Studio Turntable Lighting Underglow -->
       <div class="divider"></div>
       <div class="underglow-section">
-        <span class="section-subhead">STUDIO UNDERGLOW:</span>
+        <span class="section-subhead">STUDIO LIGHTING:</span>
         <div class="rgb-lighting-row">
-          <button class="rgb-dot active" data-hex="0x00f5d4" style="background: #00f5d4;" title="Cyber Cyan"></button>
-          <button class="rgb-dot" data-hex="0xffffff" style="background: #ffffff;" title="Studio White"></button>
-          <button class="rgb-dot" data-hex="0xe63946" style="background: #e63946;" title="Crimson Core"></button>
-          <button class="rgb-dot" data-hex="0x9d4edd" style="background: #9d4edd;" title="Vapor Violet"></button>
-          <button class="rgb-dot" data-hex="0xffb703" style="background: #ffb703;" title="Sunset Gold"></button>
+          <button class="rgb-dot active" data-hex="0x00f5d4" style="background:#00f5d4;" title="Cyan"></button>
+          <button class="rgb-dot" data-hex="0xffffff" style="background:#ffffff;" title="White"></button>
+          <button class="rgb-dot" data-hex="0xe63946" style="background:#e63946;" title="Red"></button>
+          <button class="rgb-dot" data-hex="0x9d4edd" style="background:#9d4edd;" title="Violet"></button>
+          <button class="rgb-dot" data-hex="0xffb703" style="background:#ffb703;" title="Gold"></button>
         </div>
       </div>
     </div>
 
-    <!-- Subassemblies Quick Focus Navigator -->
     <div class="hud-card glass-panel compact">
-      <div class="card-header">
-        <span class="card-title">SUBASSEMBLY FOCUS</span>
-        <span class="card-tag">CAD TREE</span>
-      </div>
+      <div class="card-header"><span class="card-title">SUBASSEMBLY FOCUS</span><span class="card-tag">GEN III CAD TREE</span></div>
       <div class="nav-chips">
-        <button class="nav-chip" data-preset="isometric">Complete V8 Assembly</button>
-        <button class="nav-chip" data-preset="macro">Forged Pistons & Crank</button>
-        <button class="nav-chip" data-preset="top">Carbon Intake Plenum</button>
-        <button class="nav-chip" data-preset="side">Twin Turbos & Headers</button>
-        <button class="nav-chip" data-preset="front">Serpentine Accessory Drive</button>
+        <button class="nav-chip" data-preset="isometric">Complete Tahoe 5.3 Assembly</button>
+        <button class="nav-chip" data-preset="macro">Crank • Rods • Pistons</button>
+        <button class="nav-chip" data-preset="top">Composite Intake • Fuel Rails</button>
+        <button class="nav-chip" data-preset="side">OHV Heads • Cast Exhaust</button>
+        <button class="nav-chip" data-preset="front">Water Pump • Serpentine Drive</button>
       </div>
     </div>
   </aside>
 
-  <!-- Right Floating HUD: Component Inspector & Dyno Bench -->
   <aside class="hud-panel hud-right">
-    <!-- Real-Time Component Inspector Card -->
     <div class="hud-card glass-panel" id="component-inspector-card">
-      <div class="card-header">
-        <span class="card-title">COMPONENT INSPECTOR</span>
-        <span class="card-tag" id="inspector-tag">CLICK / HOVER PART</span>
-      </div>
-
+      <div class="card-header"><span class="card-title">COMPONENT INSPECTOR</span><span class="card-tag" id="inspector-tag">CLICK / HOVER PART</span></div>
       <div class="inspector-body">
-        <div class="inspector-name" id="inspector-name">Left DOHC Cylinder Head</div>
-        <div class="inspector-category" id="inspector-category">CYLINDER HEADS & VALVETRAIN</div>
-        <div class="inspector-specs" id="inspector-specs">CNC Ported 4-Valve Combustion Chambers • Copper-Beryllium Seats</div>
-        <div class="inspector-desc" id="inspector-desc">Features high-flow tumble intake ports and sodium-filled exhaust valves designed for maximum volumetric efficiency under 2.5 bar boost.</div>
+        <div class="inspector-name" id="inspector-name">Gen III 5.3L Cast-Iron Block</div>
+        <div class="inspector-category" id="inspector-category">BLOCK & CRANKCASE</div>
+        <div class="inspector-specs" id="inspector-specs">3.780 in bore • 4.400 in bore spacing • 9.240 in deck</div>
+        <div class="inspector-desc" id="inspector-desc">2006 Tahoe Vortec 5300 deep-skirt iron block with the correct OHV pushrod architecture.</div>
       </div>
     </div>
 
-    <!-- Engine Dyno Telemetry Bench -->
     <div class="hud-card glass-panel dyno-hud" id="dyno-hud-card">
-      <div class="card-header">
-        <span class="card-title">V8 DYNO LIVE TELEMETRY</span>
-        <span class="card-tag red" id="dyno-live-tag">IDLE • 850 RPM</span>
-      </div>
-
+      <div class="card-header"><span class="card-title">STOCK ENGINE RUNNING VIEW</span><span class="card-tag red" id="dyno-live-tag">IDLE • 650 RPM</span></div>
       <div class="dyno-meter">
-        <div class="rpm-display">
-          <span class="rpm-number" id="dyno-rpm">850</span>
-          <span class="rpm-unit">RPM</span>
-        </div>
-        <div class="dyno-bar-wrap">
-          <div class="dyno-bar-fill" id="dyno-rpm-bar" style="width: 10%;"></div>
-        </div>
+        <div class="rpm-display"><span class="rpm-number" id="dyno-rpm">650</span><span class="rpm-unit">RPM</span></div>
+        <div class="dyno-bar-wrap"><div class="dyno-bar-fill" id="dyno-rpm-bar" style="width:10%;"></div></div>
       </div>
-
       <div class="dyno-stats-grid">
-        <div class="d-stat">
-          <span class="d-label">HORSEPOWER</span>
-          <span class="d-val" id="dyno-hp">118 HP</span>
-        </div>
-        <div class="d-stat">
-          <span class="d-label">TORQUE</span>
-          <span class="d-val" id="dyno-tq">195 LB-FT</span>
-        </div>
-        <div class="d-stat">
-          <span class="d-label">BOOST</span>
-          <span class="d-val" id="dyno-boost">0.0 BAR</span>
-        </div>
-        <div class="d-stat">
-          <span class="d-label">OIL TEMP</span>
-          <span class="d-val" id="dyno-oil">88 °C</span>
-        </div>
+        <div class="d-stat"><span class="d-label">HORSEPOWER</span><span class="d-val" id="dyno-hp">~20 HP</span></div>
+        <div class="d-stat"><span class="d-label">TORQUE</span><span class="d-val" id="dyno-tq">~160 LB-FT</span></div>
+        <div class="d-stat"><span class="d-label">INDUCTION</span><span class="d-val" id="dyno-boost">N/A • N/A</span></div>
+        <div class="d-stat"><span class="d-label">ENGINE</span><span class="d-val" id="dyno-oil">L59 5.3L</span></div>
       </div>
-
       <div class="dyno-controls">
-        <label class="throttle-label">THROTTLE PEDAL (PULL TO REV)</label>
-        <input type="range" id="throttle-slider" min="800" max="8500" step="50" value="850" class="custom-range" />
+        <label class="throttle-label">ENGINE SPEED</label>
+        <input type="range" id="throttle-slider" min="650" max="5600" step="50" value="650" class="custom-range" />
       </div>
-
-      <div class="dyno-buttons" style="display: flex; gap: 8px; margin-top: 10px;">
-        <button class="btn-action accent" id="btn-nitrous" style="flex: 1; padding: 8px; font-size: 11px;">⚡ NITROUS SHOT (1150 HP)</button>
-        <button class="btn-action primary" id="btn-launch" style="flex: 1; padding: 8px; font-size: 11px;">🔥 2-STEP LAUNCH (4500 RPM)</button>
+      <div class="dyno-buttons" style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn-action accent" id="btn-nitrous" style="flex:1;padding:8px;font-size:11px;">295 HP PEAK • 5,200 RPM</button>
+        <button class="btn-action primary" id="btn-launch" style="flex:1;padding:8px;font-size:11px;">CRUISE VIEW • 2,000 RPM</button>
       </div>
     </div>
   </aside>
 
-  <!-- Interactive 3D Cursor Hover Tooltip -->
-  <div class="hover-tooltip" id="hover-tooltip" style="display: none;">
-    <div class="tt-name" id="tt-name">Part Name</div>
-    <div class="tt-sub" id="tt-sub">Category • Click to Inspect</div>
-  </div>
-
-  <!-- Toast Notification -->
-  <div class="hud-toast" id="hud-toast">
-    <span class="toast-dot"></span>
-    <span class="toast-message" id="toast-message">Apex-V8 5.0L Twin-Turbo CAD Studio Ready.</span>
-  </div>
+  <div class="hover-tooltip" id="hover-tooltip" style="display:none;"><div class="tt-name" id="tt-name">Part Name</div><div class="tt-sub" id="tt-sub">Category • Click to Inspect</div></div>
+  <div class="hud-toast" id="hud-toast"><span class="toast-dot"></span><span class="toast-message" id="toast-message">2006 Tahoe 5.3L Vortec 5300 engine model ready.</span></div>
 
   <script type="module" src="./src/main.js"></script>
 </body>
