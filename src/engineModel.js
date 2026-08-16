@@ -1,38 +1,47 @@
 import * as THREE from 'three';
 import { TextureGenerator } from './textures.js';
+import { TAHOE_53, inch, mm } from './tahoe53Specs.js';
+
+const PI2 = Math.PI * 2;
+const PI4 = Math.PI * 4;
+const DEG = Math.PI / 180;
 
 /**
- * Ultra-Realistic CAD Procedural Apex-V8 5.0L Twin-Turbo Racing Engine Model.
- * Built using high-precision Three.js geometric construction:
- * - Extruded V8 block with curved valley and ribbed skirt
- * - Contoured cylinder heads with port bumps and domed valve covers
- * - Detailed plumbing, hoses, wiring looms, and sensors
- * - Advanced Twin Turbos with detailed compressor covers
+ * Procedural 2006 Chevrolet Tahoe 5.3L Vortec 5300 engine.
+ *
+ * This is intentionally NOT the old fictional 5.0L DOHC twin-turbo engine.
+ * The model follows the Gen III LM7/L59 truck-engine architecture:
+ * - 90° iron-block V8, 96 mm bore x 92 mm stroke
+ * - single in-block camshaft, hydraulic roller lifters, pushrods, 16 valves
+ * - cathedral-port aluminum heads, composite truck intake, 78 mm ETC throttle
+ * - stock cast exhaust manifolds, coil-near-plug ignition
+ * - crank-driven gerotor oil pump, timing chain, truck accessory drive
+ *
+ * Scene scale is dimensional: 1 Three.js unit = 4 real inches.
  */
 export class EngineModel {
   constructor() {
+    this.spec = TAHOE_53;
     this.group = new THREE.Group();
-    this.group.name = 'ApexV8Engine';
+    this.group.name = '2006_Tahoe_5.3L_Vortec_5300_L59_LM7';
 
-    // Interactive Inspectable Meshes Registry
     this.inspectableParts = [];
-
-    // Materials
-    this.initMaterials();
-
-    // Kinematic Components
-    this.crankshaft = null;
-    this.flywheel = null;
+    this.explodables = [];
+    this.xrayMaterials = [];
     this.pistons = [];
+    this.valveEvents = [];
+    this.pulleys = [];
     this.camshafts = [];
     this.valves = [];
-    this.turbos = [];
-    this.pulleys = [];
-    this.timingBelt = null;
+    this.turbos = []; // compatibility: intentionally empty on this naturally aspirated engine
     this.exhaustHeaders = [];
-    this.flameParticles = null;
 
-    // Subassemblies for Exploded View
+    this.crankAngle = 0;
+    this.rpm = 650;
+    this.isRevving = false;
+    this.explodeFactor = 0;
+    this.isXRay = false;
+
     this.subassemblies = {
       block: null,
       oilPan: null,
@@ -50,1046 +59,1174 @@ export class EngineModel {
       oilFilter: null,
       starterMotor: null,
       fuelSystem: null,
-      plumbing: null
+      plumbing: null,
+      ignition: null,
+      valvetrain: null
     };
 
-    // Engine State
-    this.crankAngle = 0;
-    this.rpm = 850;
-    this.isRevving = false;
-    this.explodeFactor = 0;
-    this.isXRay = false;
+    this._tmpA = new THREE.Vector3();
+    this._tmpB = new THREE.Vector3();
+    this._tmpDir = new THREE.Vector3();
+    this._yAxis = new THREE.Vector3(0, 1, 0);
 
+    this.initMaterials();
     this.buildEngine();
-    this.buildFlameFX();
   }
 
   initMaterials() {
     this.texCasting = TextureGenerator.createCastingGrainTexture();
-    this.texCarbon = TextureGenerator.createCarbonFiberTexture();
     this.texBrushed = TextureGenerator.createBrushedMetalTexture();
     this.texBelt = TextureGenerator.createBeltGrooveTexture();
 
-    this.matBlock = new THREE.MeshStandardMaterial({
-      color: 0x48505e, metalness: 0.85, roughness: 0.38,
-      bumpMap: this.texCasting, bumpScale: 0.015, name: 'CastAluminumBlock'
-    });
+    this.matIron = new THREE.MeshStandardMaterial({ color: 0x34373a, metalness: 0.65, roughness: 0.72, bumpMap: this.texCasting, bumpScale: 0.018, name: 'GenIII_CastIronBlock' });
+    this.matHead = new THREE.MeshStandardMaterial({ color: 0xaeb4b8, metalness: 0.72, roughness: 0.48, bumpMap: this.texCasting, bumpScale: 0.01, name: '356T6_AluminumHead' });
+    this.matAluminum = new THREE.MeshStandardMaterial({ color: 0xb9bec3, metalness: 0.82, roughness: 0.34, bumpMap: this.texBrushed, bumpScale: 0.005, name: 'CastAluminum' });
+    this.matSteel = new THREE.MeshStandardMaterial({ color: 0x70777d, metalness: 0.94, roughness: 0.28, name: 'NodularIronSteel' });
+    this.matJournal = new THREE.MeshStandardMaterial({ color: 0xc7cdd1, metalness: 0.98, roughness: 0.14, name: 'MachinedJournal' });
+    this.matPiston = new THREE.MeshStandardMaterial({ color: 0xc9cdd0, metalness: 0.78, roughness: 0.31, name: 'CastAluminumPiston' });
+    this.matComposite = new THREE.MeshStandardMaterial({ color: 0x17191a, metalness: 0.02, roughness: 0.79, name: 'BlackCompositeNylon' });
+    this.matRubber = new THREE.MeshStandardMaterial({ color: 0x111212, metalness: 0.01, roughness: 0.92, bumpMap: this.texBelt, bumpScale: 0.015, name: 'EPDMRubber' });
+    this.matGasket = new THREE.MeshStandardMaterial({ color: 0x686b6c, metalness: 0.45, roughness: 0.55, name: 'MLS_Gasket' });
+    this.matCopper = new THREE.MeshStandardMaterial({ color: 0xb57545, metalness: 0.78, roughness: 0.31, name: 'CopperWinding' });
+    this.matPorcelain = new THREE.MeshStandardMaterial({ color: 0xf2efe8, metalness: 0.03, roughness: 0.21, name: 'SparkPlugCeramic' });
+    this.matConnector = new THREE.MeshStandardMaterial({ color: 0x303233, metalness: 0.03, roughness: 0.72, name: 'ElectricalConnector' });
+    this.matFuelRail = new THREE.MeshStandardMaterial({ color: 0x999fa3, metalness: 0.88, roughness: 0.26, name: 'FuelRail' });
+    this.matInjector = new THREE.MeshStandardMaterial({ color: 0x2b2d2e, metalness: 0.1, roughness: 0.55, name: 'FuelInjector' });
+    this.matExhaust = new THREE.MeshStandardMaterial({ color: 0x58534c, metalness: 0.58, roughness: 0.84, bumpMap: this.texCasting, bumpScale: 0.02, name: 'CastNodularIronExhaust' });
+    this.matHeader = this.matExhaust; // compatibility with older dyno UI
+    this.matBelt = this.matRubber;
+    this.matYellow = new THREE.MeshStandardMaterial({ color: 0xd9aa16, metalness: 0.08, roughness: 0.45, name: 'ServiceYellow' });
+    this.matRed = new THREE.MeshStandardMaterial({ color: 0xa8231f, metalness: 0.15, roughness: 0.44, name: 'ConnectorSealRed' });
 
-    this.matIron = new THREE.MeshStandardMaterial({
-      color: 0x222630, metalness: 0.8, roughness: 0.55,
-      bumpMap: this.texCasting, bumpScale: 0.02, name: 'CastIronSkirt'
-    });
-
-    this.matLiner = new THREE.MeshStandardMaterial({
-      color: 0xf4f7fa, metalness: 0.98, roughness: 0.06, name: 'PolishedLiner'
-    });
-
-    this.matForged = new THREE.MeshStandardMaterial({
-      color: 0x86909c, metalness: 0.92, roughness: 0.22,
-      bumpMap: this.texBrushed, bumpScale: 0.008, name: 'Forged4340Steel'
-    });
-
-    this.matPiston = new THREE.MeshStandardMaterial({
-      color: 0xd4dbe6, metalness: 0.9, roughness: 0.18,
-      bumpMap: this.texBrushed, bumpScale: 0.005, name: 'BilletPiston'
-    });
-
-    this.matAnodized = new THREE.MeshStandardMaterial({
-      color: 0xd90429, metalness: 0.78, roughness: 0.22, name: 'AnodizedValveCover'
-    });
-
-    this.matPlenum = new THREE.MeshStandardMaterial({
-      color: 0x181a20, roughness: 0.28, metalness: 0.25,
-      map: this.texCarbon, name: 'CarbonPlenum'
-    });
-
-    this.matHeader = new THREE.MeshStandardMaterial({
-      color: 0xd0c4b2, metalness: 0.96, roughness: 0.14,
-      emissive: 0x000000, emissiveIntensity: 0.0, name: 'StainlessHeaders'
-    });
-
-    this.matGold = new THREE.MeshStandardMaterial({
-      color: 0xd4af37, metalness: 0.92, roughness: 0.18, name: 'MachinedGold'
-    });
-
-    this.matAnodizedBlue = new THREE.MeshStandardMaterial({
-      color: 0x0077b6, metalness: 0.85, roughness: 0.2, name: 'AnodizedBlue'
-    });
-
-    this.matBelt = new THREE.MeshStandardMaterial({
-      color: 0x111215, roughness: 0.9, metalness: 0.05,
-      bumpMap: this.texBelt, bumpScale: 0.02, name: 'RubberBelt'
-    });
-
-    this.matTurboComp = new THREE.MeshStandardMaterial({
-      color: 0xe6ebf2, metalness: 0.95, roughness: 0.14, name: 'TurboCompressor'
-    });
-
-    this.matTurboTurb = new THREE.MeshStandardMaterial({
-      color: 0x544840, metalness: 0.75, roughness: 0.6,
-      bumpMap: this.texCasting, bumpScale: 0.02, name: 'TurboTurbine'
-    });
-
-    this.matPorcelain = new THREE.MeshStandardMaterial({
-      color: 0xfcfcfc, roughness: 0.1, metalness: 0.05, name: 'CeramicPorcelain'
-    });
-
-    this.matGasket = new THREE.MeshStandardMaterial({
-      color: 0xb87333, metalness: 0.88, roughness: 0.28, name: 'CopperGasket'
-    });
-
-    this.matBraided = new THREE.MeshStandardMaterial({
-      color: 0xa0a8b4, metalness: 0.9, roughness: 0.35,
-      bumpMap: this.texCarbon, bumpScale: 0.015, name: 'BraidedHose'
-    });
+    this.xrayMaterials.push(this.matIron, this.matHead, this.matComposite, this.matAluminum, this.matExhaust);
   }
 
   registerPart(mesh, metadata) {
-    mesh.userData = metadata;
+    mesh.userData = { ...metadata, engine: '2006 Chevrolet Tahoe 5.3L Vortec 5300' };
     this.inspectableParts.push(mesh);
+    return mesh;
+  }
+
+  meta(name, category, specs, description) {
+    return { name, category, specs, description };
+  }
+
+  rememberExplode(group, vector) {
+    group.userData.explodeBase = group.position.clone();
+    group.userData.explodeVector = vector.clone();
+    this.explodables.push(group);
+  }
+
+  box(w, h, d, mat, pos = null, name = '') {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    if (pos) mesh.position.copy(pos);
+    mesh.name = name;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  cyl(r, h, mat, pos = null, radial = 32, name = '') {
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, radial), mat);
+    if (pos) mesh.position.copy(pos);
+    mesh.name = name;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  bolt(radius, length, mat = this.matSteel) {
+    const g = new THREE.Group();
+    const shank = this.cyl(radius * 0.55, length, mat, null, 12);
+    const head = this.cyl(radius, radius * 0.65, mat, new THREE.Vector3(0, length * 0.5, 0), 6);
+    g.add(shank, head);
+    return g;
+  }
+
+  tube(points, radius, material, segments = 28, radial = 10, closed = false) {
+    const curve = new THREE.CatmullRomCurve3(points, closed, 'catmullrom', 0.35);
+    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, segments, radius, radial, closed), material);
+    mesh.castShadow = true;
+    return mesh;
+  }
+
+  orientUnitCylinder(mesh, a, b) {
+    this._tmpDir.subVectors(b, a);
+    const len = this._tmpDir.length();
+    if (len < 1e-5) return;
+    this._tmpDir.multiplyScalar(1 / len);
+    mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(this._yAxis, this._tmpDir);
+    mesh.scale.set(1, len, 1);
+  }
+
+  axisForBank(bank) {
+    const angle = bank === 'L' ? 135 * DEG : 45 * DEG;
+    return { angle, vec: new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0), rotationZ: angle - Math.PI / 2 };
+  }
+
+  cylinderZ(bank, index) {
+    const spacing = inch(this.spec.geometry.boreSpacingIn);
+    const offset = inch(this.spec.geometry.cylinderBankOffsetIn);
+    const front = -1.65;
+    return front + index * spacing + (bank === 'L' ? -offset * 0.5 : offset * 0.5);
+  }
+
+  journalZ(index) {
+    return -1.65 + index * inch(this.spec.geometry.boreSpacingIn);
   }
 
   buildEngine() {
     this.buildBlockAndOilPan();
-    this.buildCrankAndFlywheel();
-    this.buildPistonsAndRods();
-    this.buildCylinderHeadsAndValves();
-    this.buildIntakeSystem();
-    this.buildExhaustAndTurbos();
-    this.buildFrontDrive();
-    this.buildAccessories();
-    this.buildFuelSystem();
-    this.buildPlumbingAndWiring();
+    this.buildCrankAndPistons();
+    this.buildCamTimingAndOilPump();
+    this.buildHeadsAndValvetrain();
+    this.buildIntakeAndFuel();
+    this.buildIgnition();
+    this.buildStockExhaust();
+    this.buildFrontAccessoryDrive();
+    this.buildAccessoriesAndSensors();
+    this.buildPlumbingAndHarness();
+    this.setRPM(650);
   }
 
-  // --- 1. Engine Block & Deep Sump Oil Pan ---
+  // ---------------------------------------------------------------------------
+  // BLOCK / PAN
+  // ---------------------------------------------------------------------------
   buildBlockAndOilPan() {
-    const blockGroup = new THREE.Group();
-    blockGroup.name = 'EngineBlockGroup';
+    const block = new THREE.Group();
+    block.name = 'GenIII_5.3_CastIron_Block';
 
-    // 1. Extruded Engine Block with Curved Valley
-    const blockShape = new THREE.Shape();
-    blockShape.moveTo(0, -0.2); // Bottom center
-    blockShape.lineTo(1.15, -0.2); // Bottom right
-    blockShape.lineTo(1.15, 0.5); // Side right
-    blockShape.lineTo(1.5, 0.8); // Water jacket bulge right
-    blockShape.lineTo(1.5, 1.4); // Right bank lower edge
-    blockShape.lineTo(1.05, 1.85); // Right bank deck outer edge
-    blockShape.lineTo(0.35, 1.15); // Right bank inner valley
-    blockShape.quadraticCurveTo(0, 0.9, -0.35, 1.15); // Curved valley
-    blockShape.lineTo(-1.05, 1.85); // Left bank deck outer edge
-    blockShape.lineTo(-1.5, 1.4); // Left bank lower edge
-    blockShape.lineTo(-1.5, 0.8); // Water jacket bulge left
-    blockShape.lineTo(-1.15, 0.5); // Side left
-    blockShape.lineTo(-1.15, -0.2); // Bottom left
-    blockShape.lineTo(0, -0.2); // Close
+    const shape = new THREE.Shape();
+    shape.moveTo(-1.34, -0.72);
+    shape.lineTo(1.34, -0.72);
+    shape.lineTo(1.49, 0.45);
+    shape.lineTo(2.03, 1.38);
+    shape.lineTo(1.66, 1.78);
+    shape.lineTo(0.63, 1.28);
+    shape.quadraticCurveTo(0, 1.02, -0.63, 1.28);
+    shape.lineTo(-1.66, 1.78);
+    shape.lineTo(-2.03, 1.38);
+    shape.lineTo(-1.49, 0.45);
+    shape.closePath();
 
-    const extrudeSettings = {
-      depth: 4.1,
+    const length = 4.62;
+    const casting = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {
+      depth: length,
+      steps: 1,
       bevelEnabled: true,
-      bevelSegments: 4,
-      steps: 2,
-      bevelSize: 0.04,
-      bevelThickness: 0.04
-    };
+      bevelSegments: 3,
+      bevelSize: 0.045,
+      bevelThickness: 0.045
+    }), this.matIron);
+    casting.position.z = -length / 2;
+    casting.castShadow = true;
+    casting.receiveShadow = true;
+    block.add(casting);
+    this.registerPart(casting, this.meta(
+      'Gen III 5.3L Deep-Skirt Cast-Iron Block',
+      'Block & Crankcase',
+      'L59/LM7 • 9.240 in nominal deck • 4.400 in bore spacing • six-bolt-main architecture',
+      'Factory-style iron Vortec 5300 block. Unlike the previous model, this is not an aluminum racing block.'
+    ));
 
-    const blockMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(blockShape, extrudeSettings), this.matBlock);
-    blockMesh.position.set(0, -0.05, -2.05); // Center longitudinally
-    blockMesh.castShadow = true;
-    blockMesh.receiveShadow = true;
-    blockGroup.add(blockMesh);
-
-    this.registerPart(blockMesh, {
-      name: 'Extruded Cast Aluminum V8 Engine Block',
-      category: 'Engine Block',
-      specs: '356-T6 Aluminum • Cross-Bolted Mains • Curved Lifter Valley',
-      description: 'Massively reinforced bottom-end architecture with contoured water jackets.'
-    });
-
-    // 2. Ribbed Lower Skirt (Crankcase)
-    const skirtShape = new THREE.Shape();
-    skirtShape.moveTo(-1.2, -0.2);
-    skirtShape.lineTo(1.2, -0.2);
-    skirtShape.lineTo(1.25, -0.8);
-    skirtShape.lineTo(-1.25, -0.8);
-    skirtShape.lineTo(-1.2, -0.2);
-    
-    const skirtGeom = new THREE.ExtrudeGeometry(skirtShape, { depth: 4.1, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.03 });
-    const skirt = new THREE.Mesh(skirtGeom, this.matIron);
-    skirt.position.set(0, -0.05, -2.05);
-    blockGroup.add(skirt);
-
-    // Cross-bolted main cap hex bolts on the skirt side
-    for (let b = 0; b < 5; b++) {
-      const zPos = -1.6 + b * 0.8;
-      [-1.25, 1.25].forEach(xPos => {
-        const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.08, 6), this.matGold);
-        bolt.rotation.z = Math.PI / 2;
-        bolt.position.set(xPos, -0.5, zPos);
-        blockGroup.add(bolt);
-      });
+    // Dimensional cylinder bores: 3.780 in nominal, 4.400 in spacing.
+    const boreRadius = inch(this.spec.geometry.boreIn) / 2;
+    const sleeveHeight = inch(7.0);
+    for (const bank of ['L', 'R']) {
+      const bankAxis = this.axisForBank(bank);
+      for (let i = 0; i < 4; i++) {
+        const bore = new THREE.Mesh(new THREE.CylinderGeometry(boreRadius, boreRadius, sleeveHeight, 36, 1, true), this.matJournal);
+        bore.rotation.z = bankAxis.rotationZ;
+        const centerDist = inch(5.55);
+        bore.position.set(bankAxis.vec.x * centerDist, bankAxis.vec.y * centerDist, this.cylinderZ(bank, i));
+        block.add(bore);
+        this.registerPart(bore, this.meta(
+          `Cylinder ${bank === 'L' ? [1, 3, 5, 7][i] : [2, 4, 6, 8][i]} Bore`,
+          'Block & Crankcase',
+          '96.0–96.018 mm service bore diameter',
+          'Cylinder centerline placed from published 4.400-in bore spacing and Gen III bank offset.'
+        ));
+      }
     }
 
-    // Cylinders / Sleeves
-    const boreGeom = new THREE.CylinderGeometry(0.45, 0.45, 1.7, 32, 1, true);
-    
-    // Left Bank (+45°)
-    const boreZ_L = [-1.35, -0.45, 0.45, 1.35];
-    boreZ_L.forEach((bz, idx) => {
-      const bore = new THREE.Mesh(boreGeom, this.matLiner);
-      bore.rotation.z = Math.PI / 4;
-      bore.position.set(-0.65, 1.1, bz);
-      blockGroup.add(bore);
-    });
+    // Five main cap locations and horizontal cross-bolts.
+    for (let i = 0; i < 5; i++) {
+      const z = -2.17 + i * 1.08;
+      const cap = this.box(1.45, 0.24, 0.28, this.matSteel, new THREE.Vector3(0, -0.48, z), `MainCap_${i + 1}`);
+      block.add(cap);
+      for (const x of [-1.42, 1.42]) {
+        const sideBolt = this.bolt(0.075, 0.26, this.matSteel);
+        sideBolt.rotation.z = Math.PI / 2;
+        sideBolt.position.set(x, -0.45, z);
+        block.add(sideBolt);
+      }
+    }
 
-    // Right Bank (-45°)
-    const boreZ_R = [-1.20, -0.30, 0.60, 1.50];
-    boreZ_R.forEach((bz, idx) => {
-      const bore = new THREE.Mesh(boreGeom, this.matLiner);
-      bore.rotation.z = -Math.PI / 4;
-      bore.position.set(0.65, 1.1, bz);
-      blockGroup.add(bore);
-    });
-
-    // Freeze plugs on the side of the block
-    for(let p=0; p<3; p++) {
-      const zPos = -1.0 + p * 1.0;
-      [-1.5, 1.5].forEach(px => {
-        const plug = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.05, 16), this.matGold);
+    // Core plugs along both sides.
+    for (const x of [-1.55, 1.55]) {
+      for (const z of [-1.38, -0.22, 0.94]) {
+        const plug = this.cyl(0.16, 0.04, this.matSteel, new THREE.Vector3(x, 0.62, z), 24);
         plug.rotation.z = Math.PI / 2;
-        plug.position.set(px, 0.8, zPos);
-        blockGroup.add(plug);
-      });
+        block.add(plug);
+      }
     }
 
-    // Knock sensors in the valley
-    [-0.45, 0.45].forEach(z => {
-      const knock = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.15, 16), this.matForged);
-      knock.position.set(0, 1.0, z);
-      blockGroup.add(knock);
-    });
+    // Valley knock sensors.
+    for (const z of [-0.66, 0.58]) {
+      const ks = new THREE.Group();
+      const body = this.cyl(0.085, 0.16, this.matSteel, null, 20);
+      const top = this.cyl(0.055, 0.09, this.matConnector, new THREE.Vector3(0, 0.11, 0), 12);
+      ks.add(body, top);
+      ks.position.set(0, 1.28, z);
+      block.add(ks);
+      this.registerPart(body, this.meta('Valley Knock Sensor', 'Sensors', 'Two Gen III valley-mounted knock sensors', 'Mounted beneath the intake manifold in the lifter valley.'));
+    }
 
-    this.subassemblies.block = blockGroup;
-    this.group.add(blockGroup);
+    // Bellhousing flange bosses / rear face.
+    const rearFace = this.box(3.0, 2.8, 0.12, this.matIron, new THREE.Vector3(0, 0.2, 2.35), 'RearBlockFace');
+    block.add(rearFace);
 
-    // 3. Deep Sump Ribbed Oil Pan
-    const panGroup = new THREE.Group();
-    panGroup.name = 'OilPanGroup';
+    this.subassemblies.block = block;
+    this.group.add(block);
 
+    // Oil pan / sump.
+    const pan = new THREE.Group();
+    pan.name = 'Truck_OilPan_Assembly';
     const panShape = new THREE.Shape();
-    panShape.moveTo(-1.25, 0);
-    panShape.lineTo(1.25, 0);
-    panShape.lineTo(1.1, -0.5);
-    panShape.lineTo(1.1, -1.0);
-    panShape.lineTo(-1.1, -1.0);
-    panShape.lineTo(-1.1, -0.5);
-    panShape.lineTo(-1.25, 0);
+    panShape.moveTo(-1.22, 0.03);
+    panShape.lineTo(1.22, 0.03);
+    panShape.lineTo(1.12, -0.46);
+    panShape.lineTo(0.92, -1.02);
+    panShape.lineTo(-0.92, -1.02);
+    panShape.lineTo(-1.12, -0.46);
+    panShape.closePath();
+    const panMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(panShape, { depth: 4.05, bevelEnabled: true, bevelSize: 0.04, bevelThickness: 0.04, bevelSegments: 2 }), this.matAluminum);
+    panMesh.position.set(0, -0.72, -2.02);
+    panMesh.castShadow = true;
+    pan.add(panMesh);
+    this.registerPart(panMesh, this.meta('GMT800 Truck Oil Pan', 'Lubrication', 'Deep-sump aluminum truck pan', 'Lower sump, gasket rail, pickup volume and drain location represented.'));
 
-    const panBody = new THREE.Mesh(new THREE.ExtrudeGeometry(panShape, { depth: 3.8, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05 }), this.matForged);
-    panBody.position.set(0, -0.85, -1.9);
-    panBody.castShadow = true;
-    panGroup.add(panBody);
-
-    // Perimeter Bolts
-    for (let b = 0; b < 8; b++) {
-      const bz = -1.7 + b * 0.48;
-      [-1.2, 1.2].forEach(bx => {
-        const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.06, 6), this.matGold);
-        bolt.position.set(bx, -0.85, bz);
-        panGroup.add(bolt);
-      });
+    for (let i = 0; i < 9; i++) {
+      const z = -1.84 + i * 0.46;
+      for (const x of [-1.18, 1.18]) {
+        const b = this.cyl(0.035, 0.07, this.matSteel, new THREE.Vector3(x, -0.74, z), 6);
+        pan.add(b);
+      }
     }
+    const drain = this.cyl(0.105, 0.15, this.matSteel, new THREE.Vector3(0.78, -1.72, 1.42), 6);
+    drain.rotation.z = Math.PI / 2;
+    pan.add(drain);
 
-    // Drain plug
-    const plug = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.15, 6), this.matGold);
-    plug.position.set(0, -1.85, 1.5);
-    panGroup.add(plug);
-
-    this.subassemblies.oilPan = panGroup;
-    this.group.add(panGroup);
+    this.subassemblies.oilPan = pan;
+    this.group.add(pan);
+    this.rememberExplode(pan, new THREE.Vector3(0, -2.0, 0));
   }
 
-  // --- 2. Forged Cross-Plane Crankshaft & Flywheel ---
-  buildCrankAndFlywheel() {
+  // ---------------------------------------------------------------------------
+  // CRANK / PISTONS / RODS
+  // ---------------------------------------------------------------------------
+  buildCrankAndPistons() {
+    const rotating = new THREE.Group();
+    rotating.name = 'Rotating_Assembly';
+    this.subassemblies.crankGroup = rotating;
+
     this.crankshaft = new THREE.Group();
-    this.crankshaft.name = 'CrankshaftAssembly';
-    this.crankshaft.position.set(0, -0.15, 0);
+    this.crankshaft.name = 'Nodular_Iron_CrossPlane_Crankshaft';
+    rotating.add(this.crankshaft);
 
-    const shaftGeom = new THREE.CylinderGeometry(0.2, 0.2, 4.4, 32);
-    const mainShaft = new THREE.Mesh(shaftGeom, this.matLiner);
-    mainShaft.rotation.x = Math.PI / 2;
-    this.crankshaft.add(mainShaft);
+    const crankLength = 4.72;
+    const main = this.cyl(inch(this.spec.geometry.mainJournalDiameterIn) / 2, crankLength, this.matJournal, null, 32, 'CrankMainAxis');
+    main.rotation.x = Math.PI / 2;
+    this.crankshaft.add(main);
+    this.registerPart(main, this.meta('Nodular-Iron Crankshaft', 'Rotating Assembly', '3.622 in stroke • 2.559 in main journals • internally balanced', 'Cross-plane Gen III crankshaft with four phased rod journals.'));
 
-    const crankPinPhases = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
-    const crankRadius = 0.35;
+    const r = inch(this.spec.geometry.crankRadiusIn);
+    const rodJournalR = inch(this.spec.geometry.rodJournalDiameterIn) / 2;
+    const journalPhases = [135, 225, 45, 315].map(v => v * DEG);
 
-    for (let c = 0; c < 4; c++) {
-      const zPos = -1.35 + c * 0.9;
-      const phase = crankPinPhases[c];
-
-      // Counterweight with rounded lathe profile
-      const webShape = new THREE.Shape();
-      webShape.moveTo(0, 0);
-      webShape.lineTo(0.65, 0);
-      webShape.quadraticCurveTo(0.7, 0.1, 0.65, 0.32);
-      webShape.lineTo(0, 0.32);
-      
-      const webGeom = new THREE.ExtrudeGeometry(webShape, { depth: 0.18, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02 });
-      const web = new THREE.Mesh(webGeom, this.matForged);
-      web.rotation.z = phase + Math.PI;
-      web.position.set(Math.cos(phase + Math.PI) * 0.25, Math.sin(phase + Math.PI) * 0.25, zPos - 0.09);
-      this.crankshaft.add(web);
-
-      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.32, 32), this.matLiner);
-      pin.rotation.x = Math.PI / 2;
-      pin.position.set(Math.cos(phase) * crankRadius, Math.sin(phase) * crankRadius, zPos);
-      this.crankshaft.add(pin);
+    // Five visible main journals.
+    for (let i = 0; i < 5; i++) {
+      const z = -2.2 + i * 1.1;
+      const j = this.cyl(inch(this.spec.geometry.mainJournalDiameterIn) / 2, 0.22, this.matJournal, new THREE.Vector3(0, 0, z), 32);
+      j.rotation.x = Math.PI / 2;
+      this.crankshaft.add(j);
     }
-
-    this.flywheel = new THREE.Group();
-    const flywheelMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.22, 48), this.matForged);
-    flywheelMesh.rotation.x = Math.PI / 2;
-    this.flywheel.add(flywheelMesh);
-
-    const ringMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.25, 0.08, 64), this.matForged);
-    ringMesh.rotation.x = Math.PI / 2;
-    this.flywheel.add(ringMesh);
-
-    for (let b = 0; b < 8; b++) {
-      const a = (b / 8) * Math.PI * 2;
-      const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.24, 6), this.matGold);
-      bolt.rotation.x = Math.PI / 2;
-      bolt.position.set(Math.cos(a) * 0.45, Math.sin(a) * 0.45, 0);
-      this.flywheel.add(bolt);
-    }
-
-    this.flywheel.position.set(0, 0, 2.2);
-    this.crankshaft.add(this.flywheel);
-
-    this.subassemblies.crankGroup = this.crankshaft;
-    this.group.add(this.crankshaft);
-  }
-
-  // --- 3. 8 Forged Pistons & Connecting Rods ---
-  buildPistonsAndRods() {
-    const crankPinPhases = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
 
     for (let i = 0; i < 4; i++) {
-      const zL = -1.35 + i * 0.9;
-      const zR = -1.20 + i * 0.9;
-      const phase = crankPinPhases[i];
+      const phase = journalPhases[i];
+      const z = this.journalZ(i);
+      const x = Math.cos(phase) * r;
+      const y = Math.sin(phase) * r;
 
-      this.createPistonAssembly('L', i, phase, Math.PI / 4, zL);
-      this.createPistonAssembly('R', i + 4, phase + Math.PI / 2, -Math.PI / 4, zR);
-    }
-  }
+      const pin = this.cyl(rodJournalR, 0.34, this.matJournal, new THREE.Vector3(x, y, z), 32, `RodJournal_${i + 1}`);
+      pin.rotation.x = Math.PI / 2;
+      this.crankshaft.add(pin);
 
-  createPistonAssembly(bank, index, phase, bankAngle, zPos) {
-    const assemblyGroup = new THREE.Group();
-    assemblyGroup.name = `PistonAssembly_${index}_${bank}`;
-    assemblyGroup.rotation.z = bankAngle;
-    assemblyGroup.position.set(0, -0.15, zPos);
-
-    // Domed Piston Crown
-    const crownShape = new THREE.Shape();
-    crownShape.moveTo(0, 0);
-    crownShape.lineTo(0.44, 0);
-    crownShape.lineTo(0.44, 0.35);
-    crownShape.quadraticCurveTo(0.2, 0.45, 0, 0.45);
-    
-    const crownGeom = new THREE.LatheGeometry(crownShape.getPoints(), 32);
-    const crown = new THREE.Mesh(crownGeom, this.matPiston);
-    crown.castShadow = true;
-
-    for (let r = 0; r < 3; r++) {
-      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.445, 0.445, 0.02, 32), this.matForged);
-      ring.position.y = 0.25 - r * 0.07;
-      crown.add(ring);
-    }
-
-    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.65, 32), this.matLiner);
-    pin.rotation.z = Math.PI / 2;
-    pin.position.y = 0.1;
-    crown.add(pin);
-
-    const conRodGroup = new THREE.Group();
-    const rodLength = 1.35;
-    
-    // I-Beam rod with ExtrudeGeometry
-    const rodShape = new THREE.Shape();
-    rodShape.moveTo(-0.06, -rodLength);
-    rodShape.lineTo(0.06, -rodLength);
-    rodShape.lineTo(0.04, 0);
-    rodShape.lineTo(-0.04, 0);
-    rodShape.lineTo(-0.06, -rodLength);
-    const rodBeam = new THREE.Mesh(new THREE.ExtrudeGeometry(rodShape, {depth: 0.16, bevelEnabled: true, bevelSize: 0.01, bevelThickness: 0.01}), this.matForged);
-    rodBeam.position.z = -0.08;
-    conRodGroup.add(rodBeam);
-
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.2, 32), this.matForged);
-    cap.rotation.x = Math.PI / 2;
-    cap.position.y = -rodLength;
-    conRodGroup.add(cap);
-
-    [-0.15, 0.15].forEach(bx => {
-      const rodBolt = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.24, 6), this.matGold);
-      rodBolt.position.set(bx, -rodLength + 0.05, 0);
-      conRodGroup.add(rodBolt);
-    });
-
-    assemblyGroup.add(crown);
-    assemblyGroup.add(conRodGroup);
-    this.group.add(assemblyGroup);
-
-    this.pistons.push({
-      group: assemblyGroup, crown: crown, conRod: conRodGroup,
-      bank: bank, bankAngle: bankAngle, phase: phase,
-      zPos: zPos, rodLength: rodLength, crankRadius: 0.35
-    });
-  }
-
-  // --- 4. Cylinder Heads & Billet Valve Covers ---
-  buildCylinderHeadsAndValves() {
-    const headL = this.createCylinderHead('L', Math.PI / 4, 1.95, -0.65, 1.1);
-    this.subassemblies.leftHead = headL;
-    this.group.add(headL);
-
-    const headR = this.createCylinderHead('R', -Math.PI / 4, 1.95, 0.65, 1.1);
-    this.subassemblies.rightHead = headR;
-    this.group.add(headR);
-
-    const coverL = this.createValveCover('L', Math.PI / 4, 2.70, -0.65, 1.1);
-    this.subassemblies.leftValveCover = coverL;
-    this.group.add(coverL);
-
-    const coverR = this.createValveCover('R', -Math.PI / 4, 2.70, 0.65, 1.1);
-    this.subassemblies.rightValveCover = coverR;
-    this.group.add(coverR);
-  }
-
-  createCylinderHead(bank, bankAngle, deckDist, pivotX, pivotY) {
-    const headGroup = new THREE.Group();
-    headGroup.name = `CylinderHead_${bank}`;
-    headGroup.rotation.z = bankAngle;
-    headGroup.position.set(pivotX, pivotY, 0); // Position at block deck
-
-    // Contoured Cylinder Head Casting using Extrude
-    const headShape = new THREE.Shape();
-    headShape.moveTo(-0.7, 0);
-    headShape.lineTo(0.7, 0);
-    // Exhaust port bump
-    headShape.lineTo(0.7, 0.3);
-    headShape.quadraticCurveTo(0.85, 0.45, 0.7, 0.6);
-    headShape.lineTo(0.45, 0.75);
-    headShape.lineTo(-0.45, 0.75);
-    // Intake port bump
-    headShape.lineTo(-0.7, 0.6);
-    headShape.quadraticCurveTo(-0.85, 0.45, -0.7, 0.3);
-    headShape.lineTo(-0.7, 0);
-
-    const extrudeSettings = { depth: 4.1, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.03 };
-    const casting = new THREE.Mesh(new THREE.ExtrudeGeometry(headShape, extrudeSettings), this.matBlock);
-    casting.position.set(0, 0, -2.05);
-    casting.castShadow = true;
-    headGroup.add(casting);
-
-    // Copper MLS Gasket
-    const gasket = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.03, 4.15), this.matGasket);
-    gasket.position.y = -0.015;
-    headGroup.add(gasket);
-
-    // 4 Spark Plugs
-    const boreZs = bank === 'L' ? [-1.35, -0.45, 0.45, 1.35] : [-1.20, -0.30, 0.60, 1.50];
-    boreZs.forEach(bz => {
-      const sparkPlug = new THREE.Group();
-      sparkPlug.position.set(0, 0.45, bz);
-
-      const hexBase = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.12, 6), this.matGold);
-      sparkPlug.add(hexBase);
-
-      const insulator = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.22, 16), this.matPorcelain);
-      insulator.position.y = 0.16;
-      sparkPlug.add(insulator);
-
-      const terminal = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.08, 16), this.matLiner);
-      terminal.position.y = 0.3;
-      sparkPlug.add(terminal);
-
-      headGroup.add(sparkPlug);
-    });
-
-    // Dual Camshafts
-    [-0.32, 0.32].forEach(cx => {
-      const camGroup = new THREE.Group();
-      camGroup.position.set(cx, 0.6, 0);
-
-      const camShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 4.15, 32), this.matLiner);
-      camShaft.rotation.x = Math.PI / 2;
-      camGroup.add(camShaft);
-
-      for (let v = 0; v < 8; v++) {
-        const lobe = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.1, 0.1, 16), this.matForged);
-        lobe.rotation.x = Math.PI / 2;
-        lobe.rotation.z = (v * Math.PI) / 4;
-        lobe.position.set(0, 0, -1.6 + v * 0.46);
-        camGroup.add(lobe);
+      // Two crank webs for each rod journal.
+      for (const dz of [-0.23, 0.23]) {
+        const web = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.58, 4, 12), this.matSteel);
+        web.rotation.z = phase - Math.PI / 2;
+        web.position.set(x * 0.48, y * 0.48, z + dz);
+        this.crankshaft.add(web);
       }
 
-      headGroup.add(camGroup);
-      this.camshafts.push(camGroup);
-    });
-
-    // 16 Valves
-    for (let v = 0; v < 8; v++) {
-      const zPos = -1.6 + v * 0.46;
-      [-0.32, 0.32].forEach(vx => {
-        const valveGroup = new THREE.Group();
-        valveGroup.position.set(vx, 0.3, zPos);
-
-        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.45, 16), this.matLiner);
-        valveGroup.add(stem);
-
-        const spring = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.28, 16), this.matGold);
-        spring.position.y = 0.08;
-        valveGroup.add(spring);
-
-        headGroup.add(valveGroup);
-        this.valves.push(valveGroup);
-      });
+      const counter = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.42, 0.18, 24), this.matSteel);
+      counter.rotation.x = Math.PI / 2;
+      counter.position.set(-Math.cos(phase) * 0.34, -Math.sin(phase) * 0.34, z + 0.28);
+      this.crankshaft.add(counter);
     }
 
-    return headGroup;
-  }
-
-  createValveCover(bank, bankAngle, baseDist, pivotX, pivotY) {
-    const coverGroup = new THREE.Group();
-    coverGroup.name = `ValveCover_${bank}`;
-    coverGroup.rotation.z = bankAngle;
-    coverGroup.position.set(pivotX, pivotY, 0);
-
-    // Domed Valve Cover Profile
-    const coverShape = new THREE.Shape();
-    coverShape.moveTo(-0.7, 0);
-    coverShape.lineTo(0.7, 0);
-    coverShape.lineTo(0.7, 0.1);
-    coverShape.quadraticCurveTo(0, 0.5, -0.7, 0.1);
-    coverShape.lineTo(-0.7, 0);
-
-    const extrudeSettings = { depth: 4.15, bevelEnabled: true, bevelSize: 0.04, bevelThickness: 0.04 };
-    const cover = new THREE.Mesh(new THREE.ExtrudeGeometry(coverShape, extrudeSettings), this.matAnodized);
-    cover.position.set(0, 0.75, -2.075);
-    cover.castShadow = true;
-    coverGroup.add(cover);
-
-    // Embossed ribs
-    for (let f = 0; f < 5; f++) {
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 3.8), this.matTurboComp);
-      // Position ribs along the dome
-      const xOffset = -0.4 + f * 0.2;
-      const yOffset = 0.75 + 0.1 + (0.5 - 0.1) * (1 - Math.pow(xOffset/0.7, 2)) + 0.03;
-      fin.position.set(xOffset, yOffset, 0);
-      coverGroup.add(fin);
+    // Gen III 24X reluctor wheel at rear.
+    const reluctor = new THREE.Group();
+    reluctor.position.z = 1.93;
+    const reluctorCore = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.055, 10, 48), this.matSteel);
+    reluctor.add(reluctorCore);
+    for (let i = 0; i < 24; i++) {
+      const a = i / 24 * PI2;
+      const tooth = this.box(0.045, 0.12, 0.08, this.matSteel, new THREE.Vector3(Math.cos(a) * 0.54, Math.sin(a) * 0.54, 0));
+      tooth.rotation.z = a;
+      reluctor.add(tooth);
     }
+    this.crankshaft.add(reluctor);
 
-    // Coil Packs
-    const boreZs = bank === 'L' ? [-1.35, -0.45, 0.45, 1.35] : [-1.20, -0.30, 0.60, 1.50];
-    boreZs.forEach((bz, idx) => {
-      const coil = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.24), this.matPlenum);
-      coil.position.set(0, 0.75 + 0.35, bz);
-      coverGroup.add(coil);
-
-      const term = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.08, 8), this.matGold);
-      term.position.set(0, 0.75 + 0.45, bz);
-      coverGroup.add(term);
-    });
-
-    // PCV Valve
-    if (bank === 'R') {
-      const pcv = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.15, 16), this.matAnodizedBlue);
-      pcv.position.set(0.3, 0.95, -1.5);
-      coverGroup.add(pcv);
-    }
-
-    // Oil Filler Cap
-    if (bank === 'L') {
-      const capNeck = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.14, 32), this.matGold);
-      capNeck.position.set(-0.35, 1.0, 1.4);
-      coverGroup.add(capNeck);
-    }
-
-    // Perimeter Bolts
-    for(let b=0; b<6; b++) {
-      const bz = -1.9 + b*0.76;
-      [-0.65, 0.65].forEach(bx => {
-        const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.08, 6), this.matGold);
-        bolt.position.set(bx, 0.75, bz);
-        coverGroup.add(bolt);
-      });
-    }
-
-    return coverGroup;
-  }
-
-  // --- 5. Carbon Fiber Intake Plenum & Swept Velocity Runners ---
-  buildIntakeSystem() {
-    const intakeGroup = new THREE.Group();
-    intakeGroup.name = 'IntakeSystemGroup';
-    intakeGroup.position.set(0, 1.8, 0);
-
-    // Domed Plenum
-    const plenumShape = new THREE.Shape();
-    plenumShape.moveTo(-0.7, 0);
-    plenumShape.lineTo(0.7, 0);
-    plenumShape.quadraticCurveTo(0.7, 0.5, 0, 0.6);
-    plenumShape.quadraticCurveTo(-0.7, 0.5, -0.7, 0);
-    const plenum = new THREE.Mesh(new THREE.ExtrudeGeometry(plenumShape, {depth: 3.6, bevelEnabled: true}), this.matPlenum);
-    plenum.position.set(0, 0.1, -1.8);
-    plenum.castShadow = true;
-    intakeGroup.add(plenum);
-
-    // 8 Curved Mandrel-Swept Carbon Velocity Runners
-    for (let r = 0; r < 4; r++) {
-      const zL = -1.35 + r * 0.9;
-      const zR = -1.20 + r * 0.9;
-
-      const curveL = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-0.4, 0.3, zL),
-        new THREE.Vector3(-0.8, 0.4, zL),
-        new THREE.Vector3(-1.3, -0.1, zL)
-      ]);
-      const runnerL = new THREE.Mesh(new THREE.TubeGeometry(curveL, 32, 0.16, 16), this.matPlenum);
-      runnerL.castShadow = true;
-      intakeGroup.add(runnerL);
-
-      const curveR = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.4, 0.3, zR),
-        new THREE.Vector3(0.8, 0.4, zR),
-        new THREE.Vector3(1.3, -0.1, zR)
-      ]);
-      const runnerR = new THREE.Mesh(new THREE.TubeGeometry(curveR, 32, 0.16, 16), this.matPlenum);
-      runnerR.castShadow = true;
-      intakeGroup.add(runnerR);
-    }
-
-    // Dual 85mm Billet Throttle Bodies
-    [-0.35, 0.35].forEach(tx => {
-      const tbBody = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.4, 32), this.matForged);
-      tbBody.rotation.x = Math.PI / 2;
-      tbBody.position.set(tx, 0.3, -1.95);
-      intakeGroup.add(tbBody);
-
-      // Flared velocity trumpet bellmouth
-      const trumpetShape = new THREE.Shape();
-      trumpetShape.moveTo(0, 0);
-      trumpetShape.lineTo(0.3, 0);
-      trumpetShape.quadraticCurveTo(0.36, 0.1, 0.38, 0.2);
-      trumpetShape.lineTo(0, 0.2);
-      const trumpet = new THREE.Mesh(new THREE.LatheGeometry(trumpetShape.getPoints(), 32), this.matAnodizedBlue);
-      trumpet.rotation.x = -Math.PI / 2;
-      trumpet.position.set(tx, 0.3, -2.15);
-      intakeGroup.add(trumpet);
-
-      // Throttle linkage
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.06, 16), this.matGold);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(tx + 0.34, 0.3, -1.95);
-      intakeGroup.add(wheel);
-    });
-
-    this.subassemblies.intakePlenum = intakeGroup;
-    this.group.add(intakeGroup);
-  }
-
-  // --- 6. Equal-Length 4-into-1 Headers & Symmetrical Twin Turbos ---
-  buildExhaustAndTurbos() {
-    const exhaustL = this.createExhaustAndTurbo('L', -2.1, 0.4);
-    this.subassemblies.leftExhaust = exhaustL.exhaust;
-    this.subassemblies.leftTurbo = exhaustL.turbo;
-    this.group.add(exhaustL.exhaust);
-    this.group.add(exhaustL.turbo);
-
-    const exhaustR = this.createExhaustAndTurbo('R', 2.1, 0.4);
-    this.subassemblies.rightExhaust = exhaustR.exhaust;
-    this.subassemblies.rightTurbo = exhaustR.turbo;
-    this.group.add(exhaustR.exhaust);
-    this.group.add(exhaustR.turbo);
-  }
-
-  createExhaustAndTurbo(bank, posX, posY) {
-    const isLeft = bank === 'L';
-    const exhaustGroup = new THREE.Group();
-    exhaustGroup.name = `ExhaustHeaders_${bank}`;
-    exhaustGroup.position.set(posX, posY, 0);
-
-    const boreZs = isLeft ? [-1.35, -0.45, 0.45, 1.35] : [-1.20, -0.30, 0.60, 1.50];
-    boreZs.forEach((bz) => {
-      const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(isLeft ? 0.75 : -0.75, 0.85, bz),
-        new THREE.Vector3(isLeft ? 0.45 : -0.45, 0.45, bz * 0.6),
-        new THREE.Vector3(isLeft ? 0.15 : -0.15, 0.1, 0.1),
-        new THREE.Vector3(0, 0, 0.2)
-      ]);
-      const pipe = new THREE.Mesh(new THREE.TubeGeometry(curve, 32, 0.14, 16), this.matHeader);
-      pipe.castShadow = true;
-      exhaustGroup.add(pipe);
-      this.exhaustHeaders.push(pipe);
-    });
-
-    // 4-into-1 Merge Collector Flange
-    const collector = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.4, 32), this.matHeader);
-    collector.rotation.x = Math.PI / 2;
-    collector.position.set(0, 0, 0.2);
-    exhaustGroup.add(collector);
-
-    // Precision Twin Turbocharger Assembly
-    const turboGroup = new THREE.Group();
-    turboGroup.name = `Turbocharger_${bank}`;
-    turboGroup.position.set(posX, posY - 0.1, 0.4);
-
-    // Turbine Housing (Volute approximation using sweeping tube)
-    const voluteCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, 0.4, 0),
-      new THREE.Vector3(0.3, 0.3, 0),
-      new THREE.Vector3(0.4, 0, 0),
-      new THREE.Vector3(0, -0.4, 0),
-      new THREE.Vector3(-0.3, 0, 0),
-      new THREE.Vector3(0, 0.2, 0)
-    ], false);
-    const turbMesh = new THREE.Mesh(new THREE.TubeGeometry(voluteCurve, 32, 0.15, 16), this.matTurboTurb);
-    turbMesh.rotation.y = isLeft ? Math.PI / 2 : -Math.PI / 2;
-    turboGroup.add(turbMesh);
-
-    // Turbine Flange
-    const tFlange = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.1, 32), this.matTurboTurb);
-    tFlange.rotation.x = Math.PI / 2;
-    tFlange.position.z = -0.1;
-    turboGroup.add(tFlange);
-
-    // CHRA (Center Housing)
-    const chra = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.25, 32), this.matForged);
-    chra.rotation.x = Math.PI / 2;
-    chra.position.z = -0.22;
-    turboGroup.add(chra);
-
-    // Compressor Housing Volute
-    const compVolute = new THREE.Mesh(new THREE.TubeGeometry(voluteCurve, 32, 0.16, 16), this.matTurboComp);
-    compVolute.rotation.y = isLeft ? -Math.PI / 2 : Math.PI / 2;
-    compVolute.position.z = -0.38;
-    turboGroup.add(compVolute);
-
-    // Flared Intake Horn
-    const hornShape = new THREE.Shape();
-    hornShape.moveTo(0, 0);
-    hornShape.lineTo(0.28, 0);
-    hornShape.quadraticCurveTo(0.32, 0.1, 0.36, 0.2);
-    hornShape.lineTo(0, 0.2);
-    const horn = new THREE.Mesh(new THREE.LatheGeometry(hornShape.getPoints(), 32), this.matAnodizedBlue);
-    horn.rotation.x = -Math.PI / 2;
-    horn.position.z = -0.38;
-    turboGroup.add(horn);
-
-    // Compressor Wheel
-    const wheel = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.28, 16), this.matForged);
-    wheel.geometry.rotateX(Math.PI / 2);
-    wheel.position.z = -0.42;
-    turboGroup.add(wheel);
-
-    // Wastegate
-    const wg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.35, 32), this.matAnodized);
-    wg.position.set(0, 0.5, 0);
-    turboGroup.add(wg);
-
-    const wgRod = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.4, 16), this.matGold);
-    wgRod.position.set(0, 0.28, 0.15);
-    turboGroup.add(wgRod);
-
-    this.turbos.push({ group: turboGroup, wheel: wheel, isLeft: isLeft });
-    return { exhaust: exhaustGroup, turbo: turboGroup };
-  }
-
-  // --- 7. Front Accessory Drive & Serpentine Belt ---
-  buildFrontDrive() {
-    const driveGroup = new THREE.Group();
-    driveGroup.name = 'FrontTimingDriveGroup';
-    driveGroup.position.set(0, 0, -2.15);
-
-    // Water Pump Housing
-    const wpShape = new THREE.Shape();
-    wpShape.moveTo(-0.4, 0.3);
-    wpShape.lineTo(0.4, 0.3);
-    wpShape.lineTo(0.5, 0.7);
-    wpShape.lineTo(0.3, 1.1);
-    wpShape.lineTo(-0.3, 1.1);
-    wpShape.lineTo(-0.5, 0.7);
-    const wpCasting = new THREE.Mesh(new THREE.ExtrudeGeometry(wpShape, {depth: 0.15, bevelEnabled:true}), this.matBlock);
-    driveGroup.add(wpCasting);
-
-    const crankPulley = this.createPulley(0.52, 0.18, 0, -0.15, 0.12, 'Harmonic Damper Crank Pulley', 4);
-    driveGroup.add(crankPulley);
-
-    const wpNeck = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.35, 32), this.matForged);
-    wpNeck.rotation.x = Math.PI / 2;
-    wpNeck.position.set(0, 0.85, 0.05);
-    driveGroup.add(wpNeck);
-    
-    const wpPulley = this.createPulley(0.44, 0.18, 0, 0.85, 0.12, 'High-Flow Water Pump Pulley', 5);
-    driveGroup.add(wpPulley);
-
-    // Alternator
-    const altGroup = new THREE.Group();
-    altGroup.position.set(1.05, 1.15, 0.12);
-    const altBody = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.44, 0.4, 32), this.matForged);
-    altBody.geometry.rotateX(Math.PI / 2);
-    altGroup.add(altBody);
-    const stator = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.06, 16, 32), this.matGasket);
-    stator.position.z = 0.05;
-    altGroup.add(stator);
-    const altPulley = this.createPulley(0.3, 0.18, 0, 0, 0.25, '220A Alternator Pulley', 3);
-    altGroup.add(altPulley);
-    driveGroup.add(altGroup);
-
-    // AC Compressor
-    const acPulley = this.createPulley(0.4, 0.18, -0.95, 0.35, 0.12, 'AC Compressor Pulley', 4);
-    driveGroup.add(acPulley);
-
-    // Tensioner & Idler
-    const idler1 = this.createPulley(0.25, 0.16, 0.65, 0.35, 0.12, 'Tensioner Idler Pulley #1', 3);
-    const idler2 = this.createPulley(0.25, 0.16, -0.65, 1.25, 0.12, 'Upper Idler Pulley #2', 3);
-    driveGroup.add(idler1);
-    driveGroup.add(idler2);
-
-    // Tangential Serpentine Belt Curve
-    const beltCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, -0.67, 0.12),
-      new THREE.Vector3(-0.95, -0.05, 0.12),
-      new THREE.Vector3(-0.95, 0.75, 0.12),
-      new THREE.Vector3(-0.65, 1.5, 0.12),
-      new THREE.Vector3(0, 1.29, 0.12),
-      new THREE.Vector3(1.05, 1.45, 0.12),
-      new THREE.Vector3(1.35, 1.15, 0.12),
-      new THREE.Vector3(0.65, 0.1, 0.12)
-    ], true);
-
-    const beltGeom = new THREE.TubeGeometry(beltCurve, 128, 0.065, 16, true);
-    this.timingBelt = new THREE.Mesh(beltGeom, this.matBelt);
-    driveGroup.add(this.timingBelt);
-
-    this.subassemblies.frontDrive = driveGroup;
-    this.group.add(driveGroup);
-  }
-
-  createPulley(radius, width, posX, posY, posZ, label, spokeCount = 4) {
-    const pulleyGroup = new THREE.Group();
-
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, width, 32), this.matAnodized);
-    rim.rotation.x = Math.PI / 2;
-    pulleyGroup.add(rim);
-
-    const web = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.85, radius * 0.85, width * 0.4, 32), this.matForged);
-    web.rotation.x = Math.PI / 2;
-    pulleyGroup.add(web);
-
-    for (let h = 0; h < spokeCount; h++) {
-      const a = (h / spokeCount) * Math.PI * 2;
-      const hole = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.18, radius * 0.18, width + 0.02, 16), this.matBelt);
+    // Flexplate (automatic transmission), rear of engine.
+    this.flywheel = new THREE.Group();
+    this.flywheel.name = 'Automatic_Flexplate';
+    this.flywheel.position.z = 2.48;
+    const plate = this.cyl(1.17, 0.075, this.matSteel, null, 64);
+    plate.rotation.x = Math.PI / 2;
+    this.flywheel.add(plate);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.18, 0.06, 10, 72), this.matSteel);
+    this.flywheel.add(ring);
+    for (let i = 0; i < 6; i++) {
+      const a = i / 6 * PI2;
+      const hole = this.cyl(0.045, 0.09, this.matIron, new THREE.Vector3(Math.cos(a) * 0.37, Math.sin(a) * 0.37, 0), 12);
       hole.rotation.x = Math.PI / 2;
-      hole.position.set(Math.cos(a) * radius * 0.55, Math.sin(a) * radius * 0.55, 0);
-      pulleyGroup.add(hole);
+      this.flywheel.add(hole);
+    }
+    this.crankshaft.add(this.flywheel);
+    this.registerPart(plate, this.meta('Automatic Transmission Flexplate', 'Rear Drive', 'GMT800 4-speed automatic drive plate representation', 'Bolts to the crank flange and carries the starter ring gear.'));
+
+    // Pistons and powdered-metal rods.
+    const pistonNumbers = { L: [1, 3, 5, 7], R: [2, 4, 6, 8] };
+    for (const bank of ['L', 'R']) {
+      const bankAxis = this.axisForBank(bank);
+      for (let i = 0; i < 4; i++) {
+        const cylNo = pistonNumbers[bank][i];
+        this.createPistonRod(rotating, bank, i, cylNo, bankAxis, journalPhases[i]);
+      }
     }
 
-    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.28, radius * 0.28, width + 0.04, 6), this.matGold);
-    bolt.rotation.x = Math.PI / 2;
-    pulleyGroup.add(bolt);
-
-    pulleyGroup.position.set(posX, posY, posZ);
-    this.pulleys.push(pulleyGroup);
-
-    return pulleyGroup;
+    this.group.add(rotating);
   }
 
-  // --- 8. Fuel Rails & Injectors ---
-  buildFuelSystem() {
-    const fuelGroup = new THREE.Group();
-    fuelGroup.name = 'FuelSystemGroup';
+  createPistonRod(parent, bank, index, cylinderNo, bankAxis, journalPhase) {
+    const piston = new THREE.Group();
+    piston.name = `Piston_${cylinderNo}`;
+    piston.rotation.z = bankAxis.rotationZ;
 
-    [-1.05, 1.05].forEach((rx, bIdx) => {
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 3.8), this.matAnodizedBlue);
-      rail.position.set(rx, 1.85, 0);
-      fuelGroup.add(rail);
+    const boreR = inch(this.spec.geometry.boreIn) / 2;
+    const pistonR = boreR * 0.965;
+    const crown = this.cyl(pistonR, 0.42, this.matPiston, new THREE.Vector3(0, 0.13, 0), 36, `PistonCrown_${cylinderNo}`);
+    piston.add(crown);
 
-      for (let j = 0; j < 4; j++) {
-        const jz = -1.3 + j * 0.88;
-        const injector = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.22, 16), this.matGold);
-        injector.position.set(rx, 1.72, jz);
-        fuelGroup.add(injector);
+    // Shallow dish on crown as a dark inset to communicate the stock dished piston.
+    const dish = this.cyl(pistonR * 0.56, 0.018, this.matIron, new THREE.Vector3(0, 0.348, 0), 32);
+    piston.add(dish);
+
+    // Three-ring package.
+    for (let ringIndex = 0; ringIndex < 3; ringIndex++) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(pistonR * 0.995, 0.012, 6, 32), this.matSteel);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.25 - ringIndex * 0.055;
+      piston.add(ring);
+    }
+
+    // Floating wrist pin on 2005–2007 architecture.
+    const wrist = this.cyl(inch(0.943) / 2, pistonR * 1.65, this.matJournal, new THREE.Vector3(0, 0.02, 0), 24);
+    wrist.rotation.z = Math.PI / 2;
+    piston.add(wrist);
+
+    parent.add(piston);
+    this.registerPart(crown, this.meta(
+      `Cylinder ${cylinderNo} Cast Aluminum Piston`,
+      'Rotating Assembly',
+      `3.780 in bore class • 3.622 in stroke • 9.5:1 engine compression`,
+      'Stock-style dished piston with three-ring package and floating wrist pin representation.'
+    ));
+
+    // Rod is a unit-height mesh continuously oriented between crank pin and wrist pin.
+    const rodMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1, 12), this.matSteel);
+    rodMesh.name = `ConnectingRod_${cylinderNo}`;
+    rodMesh.castShadow = true;
+    parent.add(rodMesh);
+    this.registerPart(rodMesh, this.meta(
+      `Cylinder ${cylinderNo} Powdered-Metal Connecting Rod`,
+      'Rotating Assembly',
+      '6.098 in center-to-center • I-beam stock architecture',
+      'Connects the floating piston pin to its cross-plane crank journal.'
+    ));
+
+    // Big-end cap and two rod-bolt cues move with rod midpoint orientation.
+    const rodCap = this.cyl(0.19, 0.13, this.matSteel, null, 20);
+    rodCap.name = `RodCap_${cylinderNo}`;
+    parent.add(rodCap);
+
+    const firingIndex = this.spec.architecture.firingOrder.indexOf(cylinderNo);
+    const firingAngle = firingIndex * Math.PI / 2;
+
+    const item = {
+      cylinderNo,
+      bank,
+      bankAxis,
+      journalPhase,
+      journalIndex: index,
+      z: this.cylinderZ(bank, index),
+      journalZ: this.journalZ(index),
+      piston,
+      rodMesh,
+      rodCap,
+      crown,
+      firingAngle,
+      rodLength: inch(this.spec.geometry.rodLengthIn),
+      crankRadius: inch(this.spec.geometry.crankRadiusIn)
+    };
+    this.pistons.push(item);
+    this.updatePiston(item);
+  }
+
+  updatePiston(p) {
+    const physicalPinAngle = this.crankAngle + p.journalPhase;
+    const theta = physicalPinAngle - p.bankAxis.angle;
+    const r = p.crankRadius;
+    const l = p.rodLength;
+    const sin = Math.sin(theta);
+    const s = r * Math.cos(theta) + Math.sqrt(Math.max(0.00001, l * l - r * r * sin * sin));
+
+    const wrist = this._tmpA.set(p.bankAxis.vec.x * s, p.bankAxis.vec.y * s, p.z);
+    p.piston.position.copy(wrist);
+
+    const crankPin = this._tmpB.set(
+      Math.cos(physicalPinAngle) * r,
+      Math.sin(physicalPinAngle) * r,
+      p.journalZ + (p.bank === 'L' ? -0.075 : 0.075)
+    );
+    this.orientUnitCylinder(p.rodMesh, crankPin, wrist);
+    p.rodMesh.scale.x = 1;
+    p.rodMesh.scale.z = 1;
+    p.rodCap.position.copy(crankPin);
+    p.rodCap.rotation.x = Math.PI / 2;
+  }
+
+  // ---------------------------------------------------------------------------
+  // CAM / TIMING / OIL PUMP
+  // ---------------------------------------------------------------------------
+  buildCamTimingAndOilPump() {
+    const valvetrain = new THREE.Group();
+    valvetrain.name = 'SingleCam_Timing_OilPump';
+    this.subassemblies.valvetrain = valvetrain;
+
+    const camY = inch(4.914);
+    this.camshaft = new THREE.Group();
+    this.camshaft.name = 'Single_InBlock_Camshaft';
+    this.camshaft.position.set(0, camY, 0);
+    const shaft = this.cyl(mm(55) / 2, 4.48, this.matSteel, null, 32, 'CamshaftCore');
+    shaft.rotation.x = Math.PI / 2;
+    this.camshaft.add(shaft);
+
+    // 16 lobes spaced along the single camshaft.
+    for (let i = 0; i < 16; i++) {
+      const z = -1.82 + i * 0.242;
+      const lobe = new THREE.Mesh(new THREE.CapsuleGeometry(0.10, 0.12, 3, 10), this.matSteel);
+      lobe.rotation.x = Math.PI / 2;
+      lobe.rotation.z = (i * 47 * DEG) % PI2;
+      lobe.position.z = z;
+      this.camshaft.add(lobe);
+    }
+    valvetrain.add(this.camshaft);
+    this.camshafts = [this.camshaft];
+    this.registerPart(shaft, this.meta('Single In-Block Camshaft', 'Valvetrain', 'OHV • 16 lobes • rotates at 1/2 crankshaft speed', 'The defining Gen III pushrod layout; there are no camshafts in the cylinder heads.'));
+
+    const frontZ = -2.36;
+    // Cam and crank sprockets.
+    const crankSprocket = this.cyl(0.31, 0.10, this.matSteel, new THREE.Vector3(0, 0, frontZ), 28);
+    crankSprocket.rotation.x = Math.PI / 2;
+    valvetrain.add(crankSprocket);
+    const camSprocket = this.cyl(0.55, 0.10, this.matSteel, new THREE.Vector3(0, camY, frontZ), 36);
+    camSprocket.rotation.x = Math.PI / 2;
+    valvetrain.add(camSprocket);
+
+    // Timing chain: paired straight runs plus arcs approximated by a closed path.
+    const chainPath = [
+      new THREE.Vector3(-0.28, -0.10, frontZ - 0.03),
+      new THREE.Vector3(-0.55, camY, frontZ - 0.03),
+      new THREE.Vector3(0, camY + 0.56, frontZ - 0.03),
+      new THREE.Vector3(0.55, camY, frontZ - 0.03),
+      new THREE.Vector3(0.28, -0.10, frontZ - 0.03),
+      new THREE.Vector3(0, -0.32, frontZ - 0.03)
+    ];
+    this.timingChain = this.tube(chainPath, 0.035, this.matSteel, 56, 6, true);
+    valvetrain.add(this.timingChain);
+
+    // Crank-driven gerotor oil pump around crank snout.
+    const oilPumpHousing = this.cyl(0.55, 0.18, this.matAluminum, new THREE.Vector3(0, 0, frontZ - 0.15), 40);
+    oilPumpHousing.rotation.x = Math.PI / 2;
+    valvetrain.add(oilPumpHousing);
+    this.registerPart(oilPumpHousing, this.meta('Crankshaft-Driven Gerotor Oil Pump', 'Lubrication', 'Front-mounted Gen III gerotor oil pump', 'Concentric with the crankshaft behind the timing cover.'));
+
+    // Pickup tube from pump to sump screen.
+    const pickup = this.tube([
+      new THREE.Vector3(-0.2, -0.18, frontZ + 0.05),
+      new THREE.Vector3(-0.65, -0.7, -1.6),
+      new THREE.Vector3(-0.52, -1.25, 0.35),
+      new THREE.Vector3(0, -1.36, 0.55)
+    ], 0.055, this.matSteel, 36, 10);
+    valvetrain.add(pickup);
+    const screen = this.cyl(0.23, 0.10, this.matSteel, new THREE.Vector3(0, -1.36, 0.55), 28);
+    screen.rotation.z = Math.PI / 2;
+    valvetrain.add(screen);
+
+    this.group.add(valvetrain);
+  }
+
+  // ---------------------------------------------------------------------------
+  // HEADS / PUSHROD VALVETRAIN
+  // ---------------------------------------------------------------------------
+  buildHeadsAndValvetrain() {
+    const headL = this.createHead('L');
+    const headR = this.createHead('R');
+    this.subassemblies.leftHead = headL;
+    this.subassemblies.rightHead = headR;
+    this.group.add(headL, headR);
+
+    const coverL = this.createValveCover('L');
+    const coverR = this.createValveCover('R');
+    this.subassemblies.leftValveCover = coverL;
+    this.subassemblies.rightValveCover = coverR;
+    this.group.add(coverL, coverR);
+
+    const pushrodGroup = new THREE.Group();
+    pushrodGroup.name = 'Lifters_Pushrods_Rockers_Valves';
+
+    const cylinderNumbers = { L: [1, 3, 5, 7], R: [2, 4, 6, 8] };
+    const deck = inch(this.spec.geometry.deckHeightNominalIn);
+    const camY = inch(4.914);
+
+    for (const bank of ['L', 'R']) {
+      const axis = this.axisForBank(bank);
+      const tangent = new THREE.Vector3(-axis.vec.y, axis.vec.x, 0);
+      for (let i = 0; i < 4; i++) {
+        const cylinderNo = cylinderNumbers[bank][i];
+        const z = this.cylinderZ(bank, i);
+        const fireIdx = this.spec.architecture.firingOrder.indexOf(cylinderNo);
+        const firingAngle = fireIdx * Math.PI / 2;
+
+        // Lifter pair sits in the valley near the cam.
+        const lifterBaseCenter = new THREE.Vector3(axis.vec.x * 0.34, camY + 0.18, z);
+        const lifters = [];
+        const pushrods = [];
+        const rockers = [];
+        const valves = [];
+
+        for (const type of ['intake', 'exhaust']) {
+          const side = type === 'intake' ? -1 : 1;
+          const lifterBase = lifterBaseCenter.clone().add(tangent.clone().multiplyScalar(side * 0.10));
+          const lifter = this.cyl(inch(this.spec.geometry.lifterDiameterIn) / 2, 0.28, this.matSteel, lifterBase, 18, `${type}_Lifter_Cyl${cylinderNo}`);
+          lifter.rotation.z = axis.rotationZ * 0.25;
+          pushrodGroup.add(lifter);
+          lifters.push({ mesh: lifter, base: lifterBase.clone(), type });
+
+          const rockerBase = new THREE.Vector3(axis.vec.x * (deck + 0.72), axis.vec.y * (deck + 0.72), z + side * 0.10);
+          const pushEnd = rockerBase.clone().add(tangent.clone().multiplyScalar(type === 'intake' ? -0.14 : 0.14));
+          const pr = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 1, 10), this.matJournal);
+          this.orientUnitCylinder(pr, lifterBase, pushEnd);
+          pushrodGroup.add(pr);
+          pushrods.push(pr);
+
+          const rocker = new THREE.Group();
+          rocker.position.copy(rockerBase);
+          rocker.rotation.z = axis.rotationZ;
+          const arm = this.box(0.42, 0.075, 0.11, this.matSteel, new THREE.Vector3(side * 0.06, 0, 0));
+          rocker.add(arm);
+          const pivot = this.cyl(0.065, 0.13, this.matJournal, new THREE.Vector3(0, 0, 0), 16);
+          pivot.rotation.x = Math.PI / 2;
+          rocker.add(pivot);
+          pushrodGroup.add(rocker);
+          rockers.push({ group: rocker, baseRot: axis.rotationZ, type });
+
+          // Valve center slightly intake-side / exhaust-side of bore axis.
+          const valveBase = new THREE.Vector3(axis.vec.x * (deck + 0.49), axis.vec.y * (deck + 0.49), z + side * 0.14);
+          const valve = new THREE.Group();
+          valve.position.copy(valveBase);
+          valve.rotation.z = axis.rotationZ + side * 6 * DEG;
+          const stem = this.cyl(0.026, 0.58, this.matJournal, new THREE.Vector3(0, -0.12, 0), 12);
+          valve.add(stem);
+          const head = this.cyl(type === 'intake' ? 0.145 : 0.125, 0.035, this.matJournal, new THREE.Vector3(0, -0.42, 0), 20);
+          valve.add(head);
+          const spring = new THREE.Mesh(new THREE.TorusKnotGeometry(0.075, 0.012, 36, 6, 2, 5), this.matSteel);
+          spring.scale.set(1, 1.55, 1);
+          spring.rotation.x = Math.PI / 2;
+          spring.position.y = 0.12;
+          valve.add(spring);
+          const retainer = this.cyl(0.09, 0.035, this.matSteel, new THREE.Vector3(0, 0.23, 0), 18);
+          valve.add(retainer);
+          pushrodGroup.add(valve);
+          valves.push({ group: valve, base: valveBase.clone(), axis: axis.vec.clone(), type, spring });
+          this.valves.push(valve);
+          this.registerPart(stem, this.meta(
+            `Cylinder ${cylinderNo} ${type === 'intake' ? 'Intake' : 'Exhaust'} Valve`,
+            'OHV Valvetrain',
+            'Two valves per cylinder • hydraulic roller / pushrod actuation',
+            'Valve is actuated through lifter, pushrod and 1.7:1 rocker arm from the single block camshaft.'
+          ));
+        }
+
+        this.valveEvents.push({ cylinderNo, firingAngle, axis, lifters, pushrods, rockers, valves });
+      }
+    }
+
+    this.group.add(pushrodGroup);
+    this.registerPart(pushrodGroup.children.find(x => x.isMesh), this.meta('Hydraulic Roller Lifter / Pushrod System', 'OHV Valvetrain', '16 lifters • 16 pushrods • 16 rocker arms • 16 valves', 'Correct pushrod Gen III layout replacing the old DOHC 32-valve system.'));
+
+    this.rememberExplode(headL, this.axisForBank('L').vec.clone().multiplyScalar(1.7));
+    this.rememberExplode(headR, this.axisForBank('R').vec.clone().multiplyScalar(1.7));
+    this.rememberExplode(coverL, this.axisForBank('L').vec.clone().multiplyScalar(2.7));
+    this.rememberExplode(coverR, this.axisForBank('R').vec.clone().multiplyScalar(2.7));
+  }
+
+  createHead(bank) {
+    const axis = this.axisForBank(bank);
+    const deck = inch(this.spec.geometry.deckHeightNominalIn);
+    const group = new THREE.Group();
+    group.name = `${bank === 'L' ? 'Driver' : 'Passenger'}_CathedralPort_AluminumHead`;
+    group.position.set(axis.vec.x * deck, axis.vec.y * deck, 0);
+    group.rotation.z = axis.rotationZ;
+
+    const body = this.box(1.44, 0.58, 4.58, this.matHead, new THREE.Vector3(0, 0.30, 0), `${bank}_HeadCasting`);
+    group.add(body);
+    this.registerPart(body, this.meta(
+      `${bank === 'L' ? 'Driver/Left' : 'Passenger/Right'} Aluminum Cylinder Head`,
+      'Cylinder Heads',
+      'Gen III 356-T6 aluminum • cathedral intake ports • two valves/cylinder',
+      'Stock-style Vortec 5300 cathedral-port cylinder head casting.'
+    ));
+
+    const gasket = this.box(1.40, 0.025, 4.62, this.matGasket, new THREE.Vector3(0, -0.018, 0), `${bank}_HeadGasket`);
+    group.add(gasket);
+
+    // Combustion chambers and port cues.
+    for (let i = 0; i < 4; i++) {
+      const z = this.cylinderZ(bank, i);
+      const localZ = z; // head group has no longitudinal translation
+      const chamber = this.cyl(inch(this.spec.geometry.boreIn) * 0.43, 0.025, this.matIron, new THREE.Vector3(0, -0.04, localZ), 28);
+      group.add(chamber);
+
+      const intakePort = this.box(0.25, 0.25, 0.20, this.matIron, new THREE.Vector3(-0.66, 0.28, localZ - 0.08));
+      intakePort.scale.y = 1.35;
+      group.add(intakePort);
+      const exhaustPort = this.cyl(0.13, 0.20, this.matIron, new THREE.Vector3(0.67, 0.30, localZ + 0.10), 18);
+      exhaustPort.rotation.z = Math.PI / 2;
+      group.add(exhaustPort);
+    }
+
+    // Head bolt stations.
+    for (let i = 0; i < 5; i++) {
+      const z = -2.0 + i * 1.0;
+      for (const x of [-0.45, 0.45]) {
+        const b = this.cyl(0.045, 0.10, this.matSteel, new THREE.Vector3(x, 0.60, z), 6);
+        group.add(b);
+      }
+    }
+    return group;
+  }
+
+  createValveCover(bank) {
+    const axis = this.axisForBank(bank);
+    const deck = inch(this.spec.geometry.deckHeightNominalIn);
+    const group = new THREE.Group();
+    group.name = `${bank}_ValveCover_CoilMount`;
+    group.position.set(axis.vec.x * (deck + 0.73), axis.vec.y * (deck + 0.73), 0);
+    group.rotation.z = axis.rotationZ;
+
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.58, -0.13);
+    shape.lineTo(0.58, -0.13);
+    shape.quadraticCurveTo(0.68, 0.04, 0.50, 0.28);
+    shape.lineTo(-0.50, 0.28);
+    shape.quadraticCurveTo(-0.68, 0.04, -0.58, -0.13);
+    const mesh = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 4.38, bevelEnabled: true, bevelSize: 0.035, bevelThickness: 0.035, bevelSegments: 2 }), this.matAluminum);
+    mesh.position.z = -2.19;
+    mesh.castShadow = true;
+    group.add(mesh);
+    this.registerPart(mesh, this.meta(
+      `${bank === 'L' ? 'Driver' : 'Passenger'} Valve Cover`,
+      'Cylinder Heads',
+      'Gen III truck valve-cover / coil-mount assembly',
+      'Covers the rocker valvetrain and supports the coil-near-plug ignition brackets.'
+    ));
+
+    for (let i = 0; i < 4; i++) {
+      const z = this.cylinderZ(bank, i);
+      const b = this.cyl(0.035, 0.08, this.matSteel, new THREE.Vector3(0, 0.32, z), 6);
+      group.add(b);
+    }
+    return group;
+  }
+
+  // ---------------------------------------------------------------------------
+  // INTAKE / FUEL
+  // ---------------------------------------------------------------------------
+  buildIntakeAndFuel() {
+    const intake = new THREE.Group();
+    intake.name = 'Composite_Truck_Intake_Manifold';
+
+    const lower = this.box(1.72, 0.32, 4.10, this.matComposite, new THREE.Vector3(0, 2.13, 0), 'IntakeLower');
+    intake.add(lower);
+    const plenum = this.box(1.50, 0.72, 3.42, this.matComposite, new THREE.Vector3(0, 2.55, 0.12), 'IntakePlenum');
+    plenum.scale.x = 1.08;
+    intake.add(plenum);
+    this.registerPart(plenum, this.meta(
+      'Composite Truck Intake Manifold',
+      'Air Induction',
+      'One-piece composite • eight long runners • cathedral-port Gen III interface',
+      'Stock naturally aspirated truck plenum and runner layout; no carbon race plenum and no forced induction.'
+    ));
+
+    // Eight curved runners, four to each bank.
+    for (const bank of ['L', 'R']) {
+      const axis = this.axisForBank(bank);
+      for (let i = 0; i < 4; i++) {
+        const z = this.cylinderZ(bank, i);
+        const end = new THREE.Vector3(axis.vec.x * 1.62, axis.vec.y * 1.62 + 0.55, z);
+        const start = new THREE.Vector3(bank === 'L' ? -0.42 : 0.42, 2.52, z + (bank === 'L' ? 0.10 : -0.10));
+        const mid = start.clone().lerp(end, 0.55);
+        mid.y += 0.18;
+        const runner = this.tube([start, mid, end], 0.14, this.matComposite, 24, 12);
+        intake.add(runner);
+      }
+    }
+
+    // 78 mm electronic throttle body at the front (negative Z).
+    const tb = new THREE.Group();
+    tb.name = '78mm_Electronic_ThrottleBody';
+    tb.position.set(0, 2.50, -2.15);
+    tb.rotation.x = Math.PI / 2;
+    const body = new THREE.Mesh(new THREE.TorusGeometry(mm(this.spec.architecture.throttleBodyMm) / 2 + 0.08, 0.12, 12, 36), this.matAluminum);
+    tb.add(body);
+    const bore = this.cyl(mm(this.spec.architecture.throttleBodyMm) / 2, 0.26, this.matAluminum, null, 36);
+    tb.add(bore);
+    const blade = this.box(mm(this.spec.architecture.throttleBodyMm) * 0.90, 0.02, mm(this.spec.architecture.throttleBodyMm) * 0.90, this.matCopper);
+    blade.rotation.x = 8 * DEG;
+    tb.add(blade);
+    const actuator = this.box(0.34, 0.34, 0.26, this.matConnector, new THREE.Vector3(0.48, 0, 0));
+    tb.add(actuator);
+    intake.add(tb);
+    this.registerPart(bore, this.meta('78 mm Electronic Throttle Body', 'Air Induction', 'Gen III 78 mm ETC throttle opening', 'Front-mounted electronic throttle body feeding the composite truck intake.'));
+
+    // MAP sensor on rear plenum.
+    const map = this.box(0.17, 0.10, 0.28, this.matConnector, new THREE.Vector3(0, 2.93, 1.52), 'MAP_Sensor');
+    intake.add(map);
+    this.registerPart(map, this.meta('MAP Sensor', 'Sensors', 'Manifold absolute pressure sensor', 'Mounted on the intake plenum and used by the PCM for load calculation.'));
+
+    this.subassemblies.intakePlenum = intake;
+    this.group.add(intake);
+    this.rememberExplode(intake, new THREE.Vector3(0, 2.6, 0));
+
+    // Fuel rails and eight injectors.
+    const fuel = new THREE.Group();
+    fuel.name = 'Sequential_Port_Fuel_System';
+    for (const bank of ['L', 'R']) {
+      const x = bank === 'L' ? -0.92 : 0.92;
+      const rail = this.box(0.12, 0.13, 3.85, this.matFuelRail, new THREE.Vector3(x, 2.25, 0), `${bank}_FuelRail`);
+      fuel.add(rail);
+      this.registerPart(rail, this.meta(`${bank === 'L' ? 'Driver' : 'Passenger'} Fuel Rail`, 'Fuel System', 'Sequential multi-port injection rail', 'Feeds four injectors on this bank. L59 calibration supports gasoline/E85 FlexFuel.'));
+      for (let i = 0; i < 4; i++) {
+        const z = this.cylinderZ(bank, i);
+        const injector = new THREE.Group();
+        injector.position.set(x, 2.09, z);
+        injector.rotation.z = bank === 'L' ? -18 * DEG : 18 * DEG;
+        const bodyI = this.cyl(0.055, 0.30, this.matInjector, null, 16);
+        injector.add(bodyI);
+        const tip = this.cyl(0.032, 0.11, this.matFuelRail, new THREE.Vector3(0, -0.18, 0), 12);
+        injector.add(tip);
+        const conn = this.box(0.11, 0.08, 0.12, this.matConnector, new THREE.Vector3(0.10, 0.04, 0));
+        injector.add(conn);
+        fuel.add(injector);
+        this.registerPart(bodyI, this.meta(`Cylinder ${bank === 'L' ? [1, 3, 5, 7][i] : [2, 4, 6, 8][i]} Fuel Injector`, 'Fuel System', 'Sequential port fuel injector', 'Injector sprays into the intake port upstream of the intake valve.'));
+      }
+    }
+    const crossover = this.tube([
+      new THREE.Vector3(-0.92, 2.25, -1.93),
+      new THREE.Vector3(0, 2.42, -2.02),
+      new THREE.Vector3(0.92, 2.25, -1.93)
+    ], 0.035, this.matRubber, 22, 8);
+    fuel.add(crossover);
+    this.subassemblies.fuelSystem = fuel;
+    this.group.add(fuel);
+    this.rememberExplode(fuel, new THREE.Vector3(0, 2.2, 0));
+  }
+
+  // ---------------------------------------------------------------------------
+  // IGNITION
+  // ---------------------------------------------------------------------------
+  buildIgnition() {
+    const ignition = new THREE.Group();
+    ignition.name = 'Coil_Near_Plug_Ignition';
+    const numbers = { L: [1, 3, 5, 7], R: [2, 4, 6, 8] };
+
+    for (const bank of ['L', 'R']) {
+      const axis = this.axisForBank(bank);
+      const tangent = new THREE.Vector3(-axis.vec.y, axis.vec.x, 0);
+      const railCenter = axis.vec.clone().multiplyScalar(inch(this.spec.geometry.deckHeightNominalIn) + 1.0);
+      const rail = this.box(0.12, 0.12, 4.18, this.matSteel, new THREE.Vector3(railCenter.x, railCenter.y, 0), `${bank}_CoilRail`);
+      rail.rotation.z = axis.rotationZ;
+      ignition.add(rail);
+
+      for (let i = 0; i < 4; i++) {
+        const cylNo = numbers[bank][i];
+        const z = this.cylinderZ(bank, i);
+        const coil = new THREE.Group();
+        coil.name = `IgnitionCoil_${cylNo}`;
+        coil.position.set(railCenter.x, railCenter.y + 0.08, z);
+        coil.rotation.z = axis.rotationZ;
+        const body = this.box(0.34, 0.24, 0.42, this.matConnector, new THREE.Vector3(0, 0, 0));
+        coil.add(body);
+        const tower = this.cyl(0.055, 0.18, this.matConnector, new THREE.Vector3(0.15, -0.12, 0), 14);
+        coil.add(tower);
+        ignition.add(coil);
+        this.registerPart(body, this.meta(`Cylinder ${cylNo} Ignition Coil`, 'Ignition', 'Coil-near-plug Gen III ignition', 'Individual PCM-controlled coil mounted near its spark plug.'));
+
+        // Spark plug at the outer side of the head.
+        const plugBase = axis.vec.clone().multiplyScalar(inch(this.spec.geometry.deckHeightNominalIn) + 0.34);
+        plugBase.add(tangent.clone().multiplyScalar(0.43));
+        plugBase.z = z;
+        const plug = new THREE.Group();
+        plug.position.copy(plugBase);
+        plug.rotation.z = axis.rotationZ + 12 * DEG;
+        const hex = this.cyl(0.075, 0.10, this.matSteel, null, 6);
+        plug.add(hex);
+        const ceramic = this.cyl(0.052, 0.22, this.matPorcelain, new THREE.Vector3(0, 0.14, 0), 16);
+        plug.add(ceramic);
+        ignition.add(plug);
+
+        // Short plug wire / boot from coil to plug.
+        const wireStart = coil.position.clone().add(axis.vec.clone().multiplyScalar(-0.08));
+        const wireEnd = plugBase.clone().add(axis.vec.clone().multiplyScalar(0.12));
+        const wire = this.tube([wireStart, wireStart.clone().lerp(wireEnd, 0.5).add(new THREE.Vector3(0, 0.08, 0)), wireEnd], 0.035, this.matRubber, 18, 8);
+        ignition.add(wire);
+      }
+    }
+
+    this.subassemblies.ignition = ignition;
+    this.group.add(ignition);
+    this.rememberExplode(ignition, new THREE.Vector3(0, 2.8, 0));
+  }
+
+  // ---------------------------------------------------------------------------
+  // STOCK CAST EXHAUST (NO TURBOS)
+  // ---------------------------------------------------------------------------
+  buildStockExhaust() {
+    const buildSide = (bank) => {
+      const g = new THREE.Group();
+      g.name = `${bank}_Stock_Cast_Exhaust_Manifold`;
+      const axis = this.axisForBank(bank);
+      const tangent = new THREE.Vector3(-axis.vec.y, axis.vec.x, 0);
+      const outerSign = bank === 'L' ? -1 : 1;
+
+      const logX = outerSign * 2.25;
+      const logY = 1.24;
+      const log = this.tube([
+        new THREE.Vector3(logX, logY, -1.72),
+        new THREE.Vector3(logX + outerSign * 0.05, logY - 0.02, -0.55),
+        new THREE.Vector3(logX + outerSign * 0.03, logY - 0.08, 0.62),
+        new THREE.Vector3(logX, logY - 0.16, 1.78)
+      ], 0.17, this.matExhaust, 34, 12);
+      g.add(log);
+      this.exhaustHeaders.push(log);
+      this.registerPart(log, this.meta(
+        `${bank === 'L' ? 'Driver' : 'Passenger'} Cast Exhaust Manifold`,
+        'Exhaust',
+        'Stock cast nodular-iron log manifold • naturally aspirated',
+        'Four exhaust ports merge into the stock-style manifold outlet. There are no turbochargers or tubular race headers.'
+      ));
+
+      for (let i = 0; i < 4; i++) {
+        const z = this.cylinderZ(bank, i);
+        const start = axis.vec.clone().multiplyScalar(inch(this.spec.geometry.deckHeightNominalIn) + 0.34);
+        start.add(tangent.clone().multiplyScalar(bank === 'L' ? 0.58 : -0.58));
+        start.z = z;
+        const end = new THREE.Vector3(logX, logY, z);
+        const branch = this.tube([start, start.clone().lerp(end, 0.5).add(new THREE.Vector3(outerSign * 0.08, -0.10, 0)), end], 0.11, this.matExhaust, 20, 10);
+        g.add(branch);
+        this.exhaustHeaders.push(branch);
       }
 
-      [-1.9, 1.9].forEach(fz => {
-        const fitting = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.14, 6), this.matAnodized);
-        fitting.rotation.x = Math.PI / 2;
-        fitting.position.set(rx, 1.85, fz);
-        fuelGroup.add(fitting);
-      });
-    });
+      const outlet = this.cyl(0.23, 0.36, this.matExhaust, new THREE.Vector3(logX, logY - 0.33, 1.62), 24);
+      outlet.rotation.x = Math.PI / 2;
+      outlet.rotation.z = 22 * DEG * outerSign;
+      g.add(outlet);
+      return g;
+    };
 
-    const crossCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-1.05, 1.85, -1.9),
-      new THREE.Vector3(0, 2.05, -2.0),
-      new THREE.Vector3(1.05, 1.85, -1.9)
-    ]);
-    const crossLine = new THREE.Mesh(new THREE.TubeGeometry(crossCurve, 32, 0.035, 16), this.matBraided);
-    fuelGroup.add(crossLine);
-
-    this.subassemblies.fuelSystem = fuelGroup;
-    this.group.add(fuelGroup);
+    const left = buildSide('L');
+    const right = buildSide('R');
+    this.subassemblies.leftExhaust = left;
+    this.subassemblies.rightExhaust = right;
+    this.group.add(left, right);
+    this.rememberExplode(left, new THREE.Vector3(-2.0, 0, 0));
+    this.rememberExplode(right, new THREE.Vector3(2.0, 0, 0));
   }
 
-  // --- 9. Accessories: Oil Filter & Starter ---
-  buildAccessories() {
-    const filterGroup = new THREE.Group();
-    filterGroup.position.set(-1.3, -0.4, 0.8);
-    filterGroup.rotation.z = Math.PI / 3;
+  // ---------------------------------------------------------------------------
+  // FRONT ACCESSORY DRIVE / COOLING
+  // ---------------------------------------------------------------------------
+  buildFrontAccessoryDrive() {
+    const drive = new THREE.Group();
+    drive.name = 'GMT800_Front_Accessory_Drive';
+    const z = -2.53;
 
-    const filterBody = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.8, 32), this.matAnodizedBlue);
-    filterGroup.add(filterBody);
+    // Front timing cover.
+    const timingCover = this.box(2.55, 2.62, 0.16, this.matAluminum, new THREE.Vector3(0, 0.44, z + 0.18), 'FrontTimingCover');
+    drive.add(timingCover);
+    this.registerPart(timingCover, this.meta('Front Timing Cover', 'Front Drive', 'Gen III front cover / front seal carrier', 'Encloses the timing chain and front oil-pump area.'));
 
-    const filterBase = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.15, 32), this.matGold);
-    filterBase.position.y = -0.4;
-    filterGroup.add(filterBase);
+    // Water pump casting and dual outlet bosses.
+    const wpBody = this.cyl(0.62, 0.30, this.matAluminum, new THREE.Vector3(0, 1.05, z - 0.02), 40, 'WaterPumpBody');
+    wpBody.rotation.x = Math.PI / 2;
+    drive.add(wpBody);
+    const wpLeft = this.cyl(0.27, 0.32, this.matAluminum, new THREE.Vector3(-0.55, 0.95, z - 0.01), 28);
+    wpLeft.rotation.x = Math.PI / 2;
+    drive.add(wpLeft);
+    const wpRight = this.cyl(0.27, 0.32, this.matAluminum, new THREE.Vector3(0.55, 0.95, z - 0.01), 28);
+    wpRight.rotation.x = Math.PI / 2;
+    drive.add(wpRight);
+    this.registerPart(wpBody, this.meta('Mechanical Water Pump', 'Cooling', 'Belt-driven GMT800 Gen III water pump', 'Front-mounted coolant pump with thermostat/inlet and cylinder-head crossover function.'));
 
-    this.subassemblies.oilFilter = filterGroup;
-    this.group.add(filterGroup);
+    // Thermostat inlet neck low passenger side.
+    const tstat = this.cyl(0.20, 0.36, this.matAluminum, new THREE.Vector3(0.52, 0.55, z - 0.04), 24);
+    tstat.rotation.z = 62 * DEG;
+    drive.add(tstat);
 
-    const starterGroup = new THREE.Group();
-    starterGroup.position.set(1.1, -0.5, 1.4);
+    const crank = this.createPulley(0.57, 0.20, 0, -0.02, z - 0.18, 'Harmonic Balancer / Crank Pulley', this.matSteel);
+    const water = this.createPulley(0.47, 0.15, 0, 1.06, z - 0.22, 'Water Pump Pulley', this.matSteel);
+    const alternator = this.createAlternator(1.08, 1.55, z - 0.10);
+    const ps = this.createPumpAccessory(-1.04, 0.78, z - 0.12, 'Power Steering Pump', 0.36);
+    const ac = this.createPumpAccessory(1.02, 0.12, z - 0.10, 'A/C Compressor', 0.39, true);
+    const tensioner = this.createPulley(0.27, 0.12, -0.58, 1.48, z - 0.22, 'Automatic Belt Tensioner', this.matSteel);
+    const idler = this.createPulley(0.24, 0.12, 0.57, 0.64, z - 0.22, 'Idler Pulley', this.matSteel);
+    drive.add(crank, water, alternator, ps, ac, tensioner, idler);
 
-    const starterBody = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.9, 32), this.matIron);
+    // Serpentine belt path approximates tangent wrap around actual accessory locations.
+    const beltPoints = [
+      new THREE.Vector3(-0.48, -0.30, z - 0.34),
+      new THREE.Vector3(-1.25, 0.56, z - 0.34),
+      new THREE.Vector3(-1.00, 1.12, z - 0.34),
+      new THREE.Vector3(-0.62, 1.72, z - 0.34),
+      new THREE.Vector3(0.20, 1.53, z - 0.34),
+      new THREE.Vector3(1.26, 1.70, z - 0.34),
+      new THREE.Vector3(1.35, 1.32, z - 0.34),
+      new THREE.Vector3(0.72, 0.68, z - 0.34),
+      new THREE.Vector3(1.30, 0.18, z - 0.34),
+      new THREE.Vector3(0.55, -0.38, z - 0.34)
+    ];
+    this.serpentineBelt = this.tube(beltPoints, 0.055, this.matRubber, 100, 10, true);
+    drive.add(this.serpentineBelt);
+    this.registerPart(this.serpentineBelt, this.meta('Serpentine Accessory Belt', 'Front Drive', 'Single multi-rib accessory belt', 'Routes crankshaft power to water pump, alternator, power steering and A/C through tensioner/idler pulleys.'));
+
+    this.subassemblies.frontDrive = drive;
+    this.group.add(drive);
+    this.rememberExplode(drive, new THREE.Vector3(0, 0, -2.5));
+  }
+
+  createPulley(radius, width, x, y, z, label, material = this.matSteel) {
+    const g = new THREE.Group();
+    g.name = label.replace(/\s+/g, '_');
+    g.position.set(x, y, z);
+    const rim = this.cyl(radius, width, material, null, 36);
+    rim.rotation.x = Math.PI / 2;
+    g.add(rim);
+    const hub = this.cyl(radius * 0.28, width * 1.12, this.matJournal, null, 24);
+    hub.rotation.x = Math.PI / 2;
+    g.add(hub);
+    this.pulleys.push(g);
+    this.registerPart(rim, this.meta(label, 'Front Drive', 'Belt-driven accessory pulley', 'Stock front-drive pulley represented at the correct functional location.'));
+    return g;
+  }
+
+  createAlternator(x, y, z) {
+    const g = new THREE.Group();
+    g.name = 'Alternator';
+    g.position.set(x, y, z);
+    const body = this.cyl(0.42, 0.48, this.matAluminum, null, 36);
+    body.rotation.x = Math.PI / 2;
+    g.add(body);
+    for (let i = 0; i < 10; i++) {
+      const a = i / 10 * PI2;
+      const slot = this.box(0.05, 0.16, 0.05, this.matIron, new THREE.Vector3(Math.cos(a) * 0.34, Math.sin(a) * 0.34, -0.25));
+      slot.rotation.z = a;
+      g.add(slot);
+    }
+    const wind = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.045, 8, 32), this.matCopper);
+    wind.position.z = -0.25;
+    g.add(wind);
+    const pulley = this.createPulley(0.22, 0.13, 0, 0, -0.31, 'Alternator Pulley', this.matSteel);
+    g.add(pulley);
+    this.registerPart(body, this.meta('Alternator', 'Front Drive', 'GMT800 charging-system alternator representation', 'Belt-driven alternator mounted high at the front accessory bracket.'));
+    return g;
+  }
+
+  createPumpAccessory(x, y, z, label, pulleyR, clutch = false) {
+    const g = new THREE.Group();
+    g.name = label.replace(/\s+/g, '_');
+    g.position.set(x, y, z);
+    const body = this.cyl(pulleyR * 0.78, 0.48, this.matAluminum, null, 30);
+    body.rotation.x = Math.PI / 2;
+    g.add(body);
+    const pulley = this.createPulley(pulleyR, 0.15, 0, 0, -0.28, `${label} Pulley`, this.matSteel);
+    g.add(pulley);
+    if (clutch) {
+      const clutchPlate = this.cyl(pulleyR * 0.72, 0.045, this.matSteel, new THREE.Vector3(0, 0, -0.37), 28);
+      clutchPlate.rotation.x = Math.PI / 2;
+      g.add(clutchPlate);
+    }
+    this.registerPart(body, this.meta(label, 'Front Drive', 'Belt-driven accessory', `Stock-style ${label.toLowerCase()} body and mounting location.`));
+    return g;
+  }
+
+  // ---------------------------------------------------------------------------
+  // STARTER / FILTER / SENSORS / DIPSTICK
+  // ---------------------------------------------------------------------------
+  buildAccessoriesAndSensors() {
+    // Oil filter lower driver side.
+    const filter = new THREE.Group();
+    filter.name = 'Oil_Filter_Assembly';
+    filter.position.set(-1.16, -0.64, 1.28);
+    filter.rotation.z = -12 * DEG;
+    const filterBody = this.cyl(0.26, 0.78, this.matComposite, null, 28);
+    filter.add(filterBody);
+    const base = this.cyl(0.29, 0.08, this.matSteel, new THREE.Vector3(0, 0.41, 0), 28);
+    filter.add(base);
+    this.subassemblies.oilFilter = filter;
+    this.group.add(filter);
+    this.registerPart(filterBody, this.meta('Spin-On Engine Oil Filter', 'Lubrication', 'Lower driver-side filter location', 'Threads onto the block/oil-filter pad and filters pressurized engine oil.'));
+    this.rememberExplode(filter, new THREE.Vector3(-1.5, -0.6, 0));
+
+    // Starter lower passenger rear near flexplate.
+    const starter = new THREE.Group();
+    starter.name = 'Starter_Motor_Assembly';
+    starter.position.set(1.16, -0.36, 1.67);
+    const starterBody = this.cyl(0.26, 0.90, this.matSteel, null, 28);
     starterBody.rotation.x = Math.PI / 2;
-    starterGroup.add(starterBody);
-
-    const solenoid = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.6, 32), this.matGold);
+    starter.add(starterBody);
+    const solenoid = this.cyl(0.14, 0.62, this.matConnector, new THREE.Vector3(0, 0.26, 0), 22);
     solenoid.rotation.x = Math.PI / 2;
-    solenoid.position.set(0, 0.3, 0);
-    starterGroup.add(solenoid);
+    starter.add(solenoid);
+    const pinion = this.cyl(0.105, 0.16, this.matJournal, new THREE.Vector3(0, -0.02, 0.50), 18);
+    pinion.rotation.x = Math.PI / 2;
+    starter.add(pinion);
+    this.subassemblies.starterMotor = starter;
+    this.group.add(starter);
+    this.registerPart(starterBody, this.meta('Starter Motor', 'Starting System', 'Passenger-side Gen III starter location', 'Engages the flexplate ring gear at the rear of the engine.'));
+    this.rememberExplode(starter, new THREE.Vector3(1.6, -0.4, 0.5));
 
-    this.subassemblies.starterMotor = starterGroup;
-    this.group.add(starterGroup);
+    // Dipstick tube and yellow handle, passenger side.
+    const dipstick = this.tube([
+      new THREE.Vector3(1.12, -0.50, -0.35),
+      new THREE.Vector3(1.55, 0.45, -0.75),
+      new THREE.Vector3(1.72, 1.42, -1.12)
+    ], 0.025, this.matSteel, 24, 8);
+    this.group.add(dipstick);
+    const dipHandle = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.025, 8, 24), this.matYellow);
+    dipHandle.rotation.y = Math.PI / 2;
+    dipHandle.position.set(1.72, 1.52, -1.12);
+    this.group.add(dipHandle);
+
+    // ECT sensor front head area.
+    const ect = this.cyl(0.055, 0.16, this.matCopper, new THREE.Vector3(-1.32, 1.74, -1.92), 12);
+    ect.rotation.z = 45 * DEG;
+    this.group.add(ect);
+    this.registerPart(ect, this.meta('Engine Coolant Temperature Sensor', 'Sensors', 'Front cylinder-head coolant temperature sensor', 'Reports engine coolant temperature to the PCM.'));
+
+    // Oil pressure sender rear/top.
+    const oilPressure = this.cyl(0.075, 0.20, this.matConnector, new THREE.Vector3(0.18, 1.45, 1.93), 16);
+    this.group.add(oilPressure);
+    this.registerPart(oilPressure, this.meta('Engine Oil Pressure Sensor', 'Sensors', 'Rear upper block oil-pressure sender', 'Monitors main oil-gallery pressure.'));
+
+    // Cam sensor rear of block / valley area.
+    const camSensor = this.box(0.12, 0.18, 0.26, this.matConnector, new THREE.Vector3(0, 1.18, 2.14));
+    this.group.add(camSensor);
+    this.registerPart(camSensor, this.meta('Camshaft Position Sensor', 'Sensors', 'Gen III rear cam position sensing location', 'Provides cam phase reference to the PCM.'));
+
+    // Crank sensor right rear lower block.
+    const crankSensor = this.box(0.12, 0.16, 0.26, this.matConnector, new THREE.Vector3(1.18, -0.10, 1.88));
+    this.group.add(crankSensor);
+    this.registerPart(crankSensor, this.meta('Crankshaft Position Sensor', 'Sensors', 'Gen III 24X crank position sensing', 'Reads the 24X reluctor wheel at the rear of the crankshaft.'));
   }
 
-  // --- 10. Plumbing, Hoses & Wiring Looms ---
-  buildPlumbingAndWiring() {
-    const plumbingGroup = new THREE.Group();
-    plumbingGroup.name = 'PlumbingGroup';
+  // ---------------------------------------------------------------------------
+  // HOSES / HARNESS / PCV
+  // ---------------------------------------------------------------------------
+  buildPlumbingAndHarness() {
+    const g = new THREE.Group();
+    g.name = 'Engine_Hoses_Wiring_Harness';
 
-    // Upper Radiator Hose
-    const upperHoseCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, 1.5, -2.1),
-      new THREE.Vector3(0.5, 1.8, -2.5),
-      new THREE.Vector3(1.0, 1.7, -3.0)
-    ]);
-    const upperHose = new THREE.Mesh(new THREE.TubeGeometry(upperHoseCurve, 32, 0.15, 16), this.matBelt);
-    plumbingGroup.add(upperHose);
+    // Main top harness.
+    const loom = this.tube([
+      new THREE.Vector3(0, 2.94, -1.85),
+      new THREE.Vector3(0, 3.02, -0.55),
+      new THREE.Vector3(0.02, 2.98, 0.72),
+      new THREE.Vector3(0.12, 2.82, 1.78)
+    ], 0.07, this.matRubber, 34, 10);
+    g.add(loom);
 
-    // Lower Radiator Hose
-    const lowerHoseCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0.3, 0.85, -2.2),
-      new THREE.Vector3(0.8, 0.5, -2.6),
-      new THREE.Vector3(1.2, 0.2, -3.0)
-    ]);
-    const lowerHose = new THREE.Mesh(new THREE.TubeGeometry(lowerHoseCurve, 32, 0.18, 16), this.matBelt);
-    plumbingGroup.add(lowerHose);
-
-    // PCV Hose
-    const pcvHoseCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0.3, 0.95 + 1.1, -1.5), // From R valve cover
-      new THREE.Vector3(0.1, 1.5, -1.5),
-      new THREE.Vector3(0, 1.9, -1.0) // To intake
-    ]);
-    const pcvHose = new THREE.Mesh(new THREE.TubeGeometry(pcvHoseCurve, 32, 0.05, 16), this.matBelt);
-    plumbingGroup.add(pcvHose);
-
-    // Wiring Harness Loom (Top valley)
-    const loomCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, 1.3, -1.8),
-      new THREE.Vector3(0, 1.3, 0),
-      new THREE.Vector3(0, 1.3, 1.8)
-    ]);
-    const loom = new THREE.Mesh(new THREE.TubeGeometry(loomCurve, 32, 0.08, 16), this.matBelt);
-    plumbingGroup.add(loom);
-
-    // Coil wires branching from loom
-    for(let w=0; w<4; w++) {
-      const wz = -1.35 + w*0.9;
-      // Left coil branch
-      const wCurveL = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0, 1.3, wz),
-        new THREE.Vector3(-0.3, 1.5, wz),
-        new THREE.Vector3(-0.65, 1.85, wz)
-      ]);
-      plumbingGroup.add(new THREE.Mesh(new THREE.TubeGeometry(wCurveL, 16, 0.02, 8), this.matBelt));
-
-      // Right coil branch
-      const wCurveR = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0, 1.3, wz),
-        new THREE.Vector3(0.3, 1.5, wz),
-        new THREE.Vector3(0.65, 1.85, wz)
-      ]);
-      plumbingGroup.add(new THREE.Mesh(new THREE.TubeGeometry(wCurveR, 16, 0.02, 8), this.matBelt));
+    // Injector / coil branch harnesses.
+    for (const bank of ['L', 'R']) {
+      const side = bank === 'L' ? -1 : 1;
+      for (let i = 0; i < 4; i++) {
+        const z = this.cylinderZ(bank, i);
+        const branch = this.tube([
+          new THREE.Vector3(0, 2.98, z),
+          new THREE.Vector3(side * 0.55, 2.78, z),
+          new THREE.Vector3(side * 1.30, 2.28, z)
+        ], 0.022, this.matRubber, 14, 7);
+        g.add(branch);
+      }
     }
 
-    // Turbo Oil Feed Lines
-    const oilFeedLCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-1.15, 0.5, 0), // Block gallery
-      new THREE.Vector3(-1.6, 0.8, 0.2),
-      new THREE.Vector3(-2.1, 0.6, 0.4) // Turbo CHRA
-    ]);
-    plumbingGroup.add(new THREE.Mesh(new THREE.TubeGeometry(oilFeedLCurve, 32, 0.035, 16), this.matBraided));
+    // PCV / crankcase ventilation connection.
+    const pcv = this.tube([
+      new THREE.Vector3(-1.25, 2.14, 1.25),
+      new THREE.Vector3(-0.65, 2.55, 1.22),
+      new THREE.Vector3(-0.28, 2.75, 0.82)
+    ], 0.045, this.matRubber, 22, 8);
+    g.add(pcv);
 
-    const oilFeedRCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(1.15, 0.5, 0),
-      new THREE.Vector3(1.6, 0.8, 0.2),
-      new THREE.Vector3(2.1, 0.6, 0.4)
-    ]);
-    plumbingGroup.add(new THREE.Mesh(new THREE.TubeGeometry(oilFeedRCurve, 32, 0.035, 16), this.matBraided));
+    // Upper radiator outlet hose stub and lower inlet stub.
+    const upper = this.tube([
+      new THREE.Vector3(-0.30, 1.18, -2.60),
+      new THREE.Vector3(-0.65, 1.45, -2.92),
+      new THREE.Vector3(-1.15, 1.55, -3.08)
+    ], 0.13, this.matRubber, 22, 12);
+    g.add(upper);
+    const lower = this.tube([
+      new THREE.Vector3(0.52, 0.55, -2.58),
+      new THREE.Vector3(0.94, 0.30, -2.90),
+      new THREE.Vector3(1.32, 0.22, -3.10)
+    ], 0.14, this.matRubber, 22, 12);
+    g.add(lower);
 
-    this.subassemblies.plumbing = plumbingGroup;
-    this.group.add(plumbingGroup);
+    this.subassemblies.plumbing = g;
+    this.group.add(g);
+    this.rememberExplode(g, new THREE.Vector3(0, 3.0, 0));
   }
 
-  buildFlameFX() {
-    const count = 40;
-    const geom = new THREE.BufferGeometry();
-    const pos = new Float32Array(count * 3);
-    const cols = new Float32Array(count * 3);
-
-    for (let i = 0; i < count; i++) {
-      pos[i * 3 + 0] = (Math.random() - 0.5) * 3.5;
-      pos[i * 3 + 1] = 0.4;
-      pos[i * 3 + 2] = 2.4 + Math.random() * 1.2;
-
-      cols[i * 3 + 0] = 0.2 + Math.random() * 0.8;
-      cols[i * 3 + 1] = 0.4 + Math.random() * 0.4;
-      cols[i * 3 + 2] = 1.0;
-    }
-
-    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geom.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-
-    const mat = new THREE.PointsMaterial({
-      size: 0.22,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending
-    });
-
-    this.flameParticles = new THREE.Points(geom, mat);
-    this.group.add(this.flameParticles);
-  }
-
+  // ---------------------------------------------------------------------------
+  // STATE / KINEMATICS
+  // ---------------------------------------------------------------------------
   setRPM(targetRpm) {
-    this.rpm = targetRpm;
-    this.isRevving = targetRpm > 0;
+    this.rpm = Math.max(0, targetRpm);
+    this.isRevving = this.rpm > 0;
   }
 
   setExploded(factor) {
@@ -1099,96 +1236,80 @@ export class EngineModel {
 
   setXRay(enabled) {
     this.isXRay = enabled;
-    const opacity = enabled ? 0.25 : 1.0;
-    const transparent = enabled;
+    for (const mat of this.xrayMaterials) {
+      mat.transparent = enabled;
+      mat.opacity = enabled ? 0.20 : 1.0;
+      mat.depthWrite = !enabled;
+      mat.needsUpdate = true;
+    }
+  }
 
-    [this.matBlock, this.matIron, this.matAnodized].forEach(m => {
-      m.transparent = transparent;
-      m.opacity = opacity;
-      m.needsUpdate = true;
-    });
+  wrapCycle(a) {
+    return ((a % PI4) + PI4) % PI4;
+  }
+
+  cyclicDistance(a, b, period = PI4) {
+    let d = ((a - b + period * 0.5) % period + period) % period - period * 0.5;
+    return Math.abs(d);
+  }
+
+  valvePulse(cycle, center, width) {
+    const d = this.cyclicDistance(cycle, this.wrapCycle(center), PI4);
+    if (d >= width) return 0;
+    return 0.5 + 0.5 * Math.cos(Math.PI * d / width);
+  }
+
+  updateValvetrain() {
+    const cycle = this.wrapCycle(this.crankAngle);
+    const maxValveLift = inch(0.47); // visual/representative stock lift envelope, not a claimed cam grind number
+
+    for (const e of this.valveEvents) {
+      // Four-stroke sequence referenced to cylinder firing at e.firingAngle:
+      // power -> exhaust -> intake -> compression -> fire.
+      const exhaustCenter = e.firingAngle + Math.PI * 1.55;
+      const intakeCenter = e.firingAngle + Math.PI * 2.55;
+      const exhaustLift = this.valvePulse(cycle, exhaustCenter, 0.62 * Math.PI) * maxValveLift;
+      const intakeLift = this.valvePulse(cycle, intakeCenter, 0.62 * Math.PI) * maxValveLift;
+
+      for (const v of e.valves) {
+        const lift = v.type === 'intake' ? intakeLift : exhaustLift;
+        v.group.position.copy(v.base).addScaledVector(v.axis, -lift);
+        v.spring.scale.y = 1.55 - lift * 0.7;
+      }
+      for (const l of e.lifters) {
+        const lift = l.type === 'intake' ? intakeLift : exhaustLift;
+        l.mesh.position.copy(l.base).addScaledVector(e.axis.vec, lift / this.spec.architecture.rockerRatio);
+      }
+      for (const r of e.rockers) {
+        const lift = r.type === 'intake' ? intakeLift : exhaustLift;
+        r.group.rotation.z = r.baseRot + (r.type === 'intake' ? -1 : 1) * lift * 0.9;
+      }
+    }
   }
 
   update(delta) {
-    if (this.isRevving && this.rpm > 0) {
-      const radPerSec = (this.rpm * Math.PI * 2) / 60;
-      this.crankAngle += radPerSec * delta;
+    if (!this.isRevving || this.rpm <= 0) return;
+    const radPerSec = this.rpm * PI2 / 60;
+    this.crankAngle = (this.crankAngle + radPerSec * delta) % PI4;
 
-      if (this.crankshaft) {
-        this.crankshaft.rotation.z = this.crankAngle;
-      }
+    if (this.crankshaft) this.crankshaft.rotation.z = this.crankAngle;
+    if (this.camshaft) this.camshaft.rotation.z = this.crankAngle * 0.5;
+    for (const p of this.pistons) this.updatePiston(p);
+    this.updateValvetrain();
 
-      this.pistons.forEach((piston) => {
-        const theta = this.crankAngle + piston.phase;
-        const r = piston.crankRadius;
-        const l = piston.rodLength;
-
-        const s = r * Math.cos(theta) + Math.sqrt(l * l - r * r * Math.sin(theta) * Math.sin(theta));
-        piston.crown.position.y = s + 0.1;
-
-        const phi = Math.asin((r / l) * Math.sin(theta));
-        piston.conRod.position.y = s + 0.1;
-        piston.conRod.rotation.z = phi;
-      });
-
-      this.camshafts.forEach((cam) => {
-        cam.rotation.z = this.crankAngle * 0.5;
-      });
-
-      this.valves.forEach((valve, idx) => {
-        const camPhase = this.crankAngle * 0.5 + idx * 0.785;
-        const valveLift = Math.max(0, Math.sin(camPhase)) * 0.09;
-        valve.position.y = 0.3 - valveLift;
-      });
-
-      this.pulleys.forEach((p) => {
-        p.rotation.z = this.crankAngle * 0.8;
-      });
-
-      this.turbos.forEach((t) => {
-        t.wheel.rotation.z += radPerSec * delta * 4.0;
-      });
-
-      if (this.rpm > 3500) {
-        const heatPct = (this.rpm - 3500) / 5000;
-        this.matHeader.emissive.setHex(0xff3300);
-        this.matHeader.emissiveIntensity = heatPct * 2.2 * (0.85 + Math.sin(this.crankAngle * 4) * 0.15);
-
-        if (this.flameParticles) {
-          this.flameParticles.material.opacity = heatPct * (0.6 + Math.sin(this.crankAngle * 8) * 0.4);
-        }
-      } else {
-        this.matHeader.emissiveIntensity = 0;
-        if (this.flameParticles) {
-          this.flameParticles.material.opacity = 0;
-        }
-      }
+    for (let i = 0; i < this.pulleys.length; i++) {
+      const pulley = this.pulleys[i];
+      pulley.rotation.z += radPerSec * delta * (i === 0 ? 1 : 1.15);
     }
   }
 
   updateExplodedTransforms() {
     const f = this.explodeFactor;
-    const s = this.subassemblies;
-
-    if (s.oilPan) s.oilPan.position.y = -f * 1.8;
-    if (s.intakePlenum) s.intakePlenum.position.y = 1.8 + f * 2.5;
-
-    if (s.leftHead) s.leftHead.position.set(-0.65 - f * 1.6, 1.1 + f * 1.6, 0);
-    if (s.rightHead) s.rightHead.position.set(0.65 + f * 1.6, 1.1 + f * 1.6, 0);
-
-    if (s.leftValveCover) s.leftValveCover.position.set(-0.65 - f * 2.8, 1.1 + f * 2.8, 0);
-    if (s.rightValveCover) s.rightValveCover.position.set(0.65 + f * 2.8, 1.1 + f * 2.8, 0);
-
-    if (s.leftTurbo) s.leftTurbo.position.set(-2.1 - f * 2.2, 0.4, 0.4);
-    if (s.rightTurbo) s.rightTurbo.position.set(2.1 + f * 2.2, 0.4, 0.4);
-
-    if (s.leftExhaust) s.leftExhaust.position.set(-2.1 - f * 1.4, 0.4, 0);
-    if (s.rightExhaust) s.rightExhaust.position.set(2.1 + f * 1.4, 0.4, 0);
-
-    if (s.frontDrive) s.frontDrive.position.set(0, 0, -2.15 - f * 2.2);
-    if (s.oilFilter) s.oilFilter.position.set(-1.3 - f * 1.5, -0.4, 0.8);
-    if (s.starterMotor) s.starterMotor.position.set(1.1 + f * 1.5, -0.5, 1.4);
-    if (s.fuelSystem) s.fuelSystem.position.y = f * 2.6;
-    if (s.plumbing) s.plumbing.position.y = f * 3.5;
+    for (const item of this.explodables) {
+      const base = item.userData.explodeBase;
+      const vec = item.userData.explodeVector;
+      if (!base || !vec) continue;
+      item.position.copy(base).addScaledVector(vec, f);
+    }
   }
 }
