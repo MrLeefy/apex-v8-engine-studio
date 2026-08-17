@@ -3,12 +3,15 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CAD_ASSETS, CAD_SOURCE_TIERS, cadCoverageSummary } from './cadAssetRegistry.js';
 
 /**
- * Loads CAD-derived GLB parts when they are available under /public/cad.
+ * Loads CAD-derived GLB parts when they are explicitly listed in
+ * /public/cad/cad-assets.json.
  *
  * IMPORTANT:
- * - Missing assets are NOT errors; the procedural engine remains visible.
- * - Unverified transforms never replace procedural geometry automatically.
+ * - Missing assets are NOT errors; the mechanically grounded fallback remains.
+ * - Unverified transforms never replace procedural/reference geometry.
  * - OEM verification is deliberately strict and provenance-driven.
+ * - The manifest prevents a browser run from generating dozens of meaningless
+ *   404 requests for CAD files that have not actually been sourced yet.
  */
 export class CadAssetOverlay {
   constructor(app) {
@@ -25,6 +28,7 @@ export class CadAssetOverlay {
       startedAt: null,
       completedAt: null,
       registry: cadCoverageSummary(),
+      availableManifestIds: [],
       loaded: [],
       missing: [],
       rejected: []
@@ -36,10 +40,25 @@ export class CadAssetOverlay {
   async loadAvailable() {
     this.report.startedAt = new Date().toISOString();
 
-    // Probe serially to avoid hammering the dev server with 404s and to keep
-    // provenance/debug logs readable.
-    for (const asset of CAD_ASSETS) {
+    const availableIds = await this.readAvailableManifest();
+    this.report.availableManifestIds = [...availableIds];
+
+    const registryById = new Map(CAD_ASSETS.map(asset => [asset.id, asset]));
+    for (const id of availableIds) {
+      const asset = registryById.get(id);
+      if (!asset) {
+        this.report.rejected.push({ id, reason: 'asset id is not present in CAD registry' });
+        continue;
+      }
       await this.tryLoad(asset);
+    }
+
+    // Registry entries that have not yet been sourced are reported as pending,
+    // without making network requests for imaginary files.
+    for (const asset of CAD_ASSETS) {
+      if (!availableIds.has(asset.id)) {
+        this.report.missing.push({ id: asset.id, path: asset.meshPath, reason: 'not yet listed in cad-assets.json' });
+      }
     }
 
     this.report.completedAt = new Date().toISOString();
@@ -50,9 +69,23 @@ export class CadAssetOverlay {
     const verifiedLoaded = this.report.loaded.filter(x => x.oemVerified).length;
     console.info(
       `[CAD] ${this.report.loadedCount}/${CAD_ASSETS.length} registered CAD assets loaded; ` +
-      `${verifiedLoaded} are OEM/scan verified. Procedural fallback remains for missing assets.`
+      `${verifiedLoaded} are OEM/supplier/scan verified. Reference fallback remains for pending assets.`
     );
     return this.report;
+  }
+
+  async readAvailableManifest() {
+    try {
+      const response = await fetch('/cad/cad-assets.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const json = await response.json();
+      if (!Array.isArray(json.assets)) throw new Error('manifest.assets must be an array');
+      return new Set(json.assets.map(String));
+    } catch (error) {
+      this.failures.set('cad-assets.json', error);
+      this.report.rejected.push({ id: 'cad-assets.json', reason: `CAD availability manifest could not be read: ${error.message}` });
+      return new Set();
+    }
   }
 
   async tryLoad(asset) {
@@ -81,17 +114,15 @@ export class CadAssetOverlay {
         oemVerified: verdict.oemVerified
       });
 
-      // We only suppress the procedural placeholder when both geometry AND
-      // assembly transform are positively verified. A pretty third-party mesh
-      // is not allowed to silently become the source of truth.
+      // Suppress a fallback only when geometry AND its engine assembly transform
+      // are both positively verified from an allowed exact source tier.
       if (asset.replace && verdict.oemVerified && provenance.assemblyTransformVerified === true) {
         const fallback = this.engine.subassemblies?.[asset.replace];
         if (fallback) fallback.visible = false;
       }
     } catch (error) {
-      // A 404/missing file is expected until a real CAD asset has been sourced.
       this.failures.set(asset.id, error);
-      this.report.missing.push({ id: asset.id, path: asset.meshPath });
+      this.report.missing.push({ id: asset.id, path: asset.meshPath, reason: error.message });
     }
   }
 
@@ -133,7 +164,7 @@ export class CadAssetOverlay {
     };
 
     // Three.js engine coordinates use 1 scene unit = 4 inches = 101.6 mm.
-    // Convert CAD-native units to scene units only. Never eyeball a scale.
+    // Convert CAD-native units deterministically. Never eyeball a scale.
     const sceneUnitsPerSourceUnit = provenance.units === 'mm'
       ? 1 / 101.6
       : provenance.units === 'inch'
