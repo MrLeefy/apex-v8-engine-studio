@@ -45,6 +45,8 @@ class App {
     this.cameraMode = 'orbit';
     this.camTargetPos = new THREE.Vector3(7.2, 4.6, 7.2);
     this.camLookAtTarget = new THREE.Vector3(0, 0.65, 0);
+    this.camStartPos = new THREE.Vector3(7.2, 4.6, 7.2);
+    this.camStartLookAt = new THREE.Vector3(0, 0.65, 0);
     this.isAnimatingPreset = false;
     this.presetLerpProgress = 0;
     this.init();
@@ -182,7 +184,6 @@ class App {
     installGmt800ReferenceFrontDrive(this.engine);
     refineGmt800FrontDrive(this.engine);
 
-    // Preserve engineering metadata after legacy inspector registration.
     if (this.engine.serpentineBelt) {
       this.engine.serpentineBelt.userData.belt = {
         ribs: 6,
@@ -202,13 +203,9 @@ class App {
 
     this.scene.add(this.engine.group);
 
-    // STEP-derived fasteners are rendered via shared instanced geometry. Their
-    // CAD dimensions are source-grounded; mounting transforms remain explicitly
-    // reference-positioned until a production datum/scan proves them.
     this.referenceCadFasteners = new ReferenceCadFasteners(this.engine);
     this.referenceCadFasteners.install().catch(error => console.warn('[CAD fasteners] install failed', error));
 
-    // Separately, verified OEM/supplier/scan CAD assets may replace fallbacks.
     this.cadOverlay = new CadAssetOverlay(this);
     this.cadOverlay.loadAvailable().catch(error => console.warn('[CAD] overlay load failed', error));
 
@@ -262,12 +259,14 @@ class App {
 
   setCameraPreset(preset) {
     this.cameraMode = preset;
+    this.camStartPos.copy(this.camera.position);
+    this.camStartLookAt.copy(this.controls.target);
     this.isAnimatingPreset = true;
     this.presetLerpProgress = 0;
 
     const presets = {
       isometric: [[7.2, 4.6, 7.2], [0, 0.65, 0]],
-      front: [[0, 1.35, -7.0], [0, 0.55, -0.35]],
+      front: [[0, 1.05, -7.6], [0, 0.55, -1.0]],
       top: [[0, 8.5, 0.2], [0, 1.25, 0]],
       side: [[-7.2, 1.65, 0.5], [-0.45, 0.85, 0]],
       macro: [[-3.0, 1.35, -0.8], [-0.85, 0.75, -0.55]],
@@ -297,11 +296,16 @@ class App {
     this.ui?.update(delta);
 
     if (this.isAnimatingPreset) {
-      this.presetLerpProgress += delta * 3;
-      const t = Math.min(this.presetLerpProgress, 1);
-      this.camera.position.lerp(this.camTargetPos, t * 0.12);
-      this.controls.target.lerp(this.camLookAtTarget, t * 0.12);
-      if (this.presetLerpProgress >= 1) this.isAnimatingPreset = false;
+      this.presetLerpProgress = Math.min(1, this.presetLerpProgress + delta * 2.6);
+      const t = this.presetLerpProgress;
+      const smooth = t * t * (3 - 2 * t);
+      this.camera.position.lerpVectors(this.camStartPos, this.camTargetPos, smooth);
+      this.controls.target.lerpVectors(this.camStartLookAt, this.camLookAtTarget, smooth);
+      if (t >= 1) {
+        this.camera.position.copy(this.camTargetPos);
+        this.controls.target.copy(this.camLookAtTarget);
+        this.isAnimatingPreset = false;
+      }
     }
 
     this.controls.update();
