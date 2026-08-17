@@ -2,6 +2,9 @@ import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
 
+const EXPECTED_STEP_FASTENER_INSTANCES = 92;
+const EXPECTED_STEP_FASTENER_FAMILIES = 14;
+
 async function run3DInspection() {
   console.log('🚀 Starting Three.js Automated 3D Scene Inspection & Vision Audit...');
 
@@ -22,7 +25,7 @@ async function run3DInspection() {
 
   const page = await browser.newPage();
   await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(60000);
   page.setDefaultNavigationTimeout(30000);
 
   const consoleLogs = [];
@@ -50,7 +53,17 @@ async function run3DInspection() {
 
     await page.waitForSelector('#canvas-container canvas', { visible: true, timeout: 20000 });
     await page.waitForFunction(() => Boolean(window.__DEBUG_BRIDGE__ && window.__ENGINE__), { timeout: 20000 });
-    await new Promise(r => setTimeout(r, 1800));
+
+    console.log('🔩 Waiting for OpenCascade-derived GLB fastener geometry to finish loading...');
+    await page.waitForFunction(() => {
+      const report = typeof window.__FASTENER_CAD_REPORT__ === 'function'
+        ? window.__FASTENER_CAD_REPORT__()
+        : null;
+      return Boolean(report?.ready);
+    }, { timeout: 60000 });
+
+    // Allow one rendered frame after the async GLB/InstancedMesh layer reaches ready.
+    await new Promise(r => setTimeout(r, 1200));
 
     console.log('🔍 Querying live ThreeDebugBridge / engine / CAD APIs...');
     const sceneAudit = await page.evaluate(() => {
@@ -66,6 +79,7 @@ async function run3DInspection() {
       const objects = bridge.list_scene_objects();
       const rendererStats = bridge.get_renderer_stats();
       const cadReport = typeof window.__CAD_REPORT__ === 'function' ? window.__CAD_REPORT__() : null;
+      const fastenerCadReport = typeof window.__FASTENER_CAD_REPORT__ === 'function' ? window.__FASTENER_CAD_REPORT__() : null;
 
       const mainBelt = engine.serpentineBelt;
       const acBelt = engine.acDriveBelt;
@@ -89,6 +103,7 @@ async function run3DInspection() {
           reason: 'Targeted subassembly collision checks should be used; legacy global sweep is O(n²) and real engine assemblies intentionally contain nested/contacting parts.'
         },
         cad: cadReport,
+        stepFasteners: fastenerCadReport,
         engine: {
           name: engine.group?.name || null,
           inspectableParts: engine.inspectableParts?.length || 0,
@@ -138,15 +153,39 @@ async function run3DInspection() {
     if (drive.acBelt?.ribs !== 4) registryFailures.push(`A/C belt must be 4-rib, got ${drive.acBelt?.ribs}`);
     if (drive.acBelt?.gmPart !== '12576447') registryFailures.push(`wrong A/C belt GM identity: ${drive.acBelt?.gmPart}`);
 
-    if (registryFailures.length) throw new Error(`Engine architecture registry failed: ${registryFailures.join('; ')}`);
+    const fasteners = sceneAudit.stepFasteners;
+    if (!fasteners?.ready) registryFailures.push('STEP-derived fastener renderer never reached ready');
+    if ((fasteners?.errors?.length ?? -1) !== 0) registryFailures.push(`STEP-derived fastener renderer has ${fasteners?.errors?.length ?? 'unknown'} load errors`);
+    if (fasteners?.instanceCount !== EXPECTED_STEP_FASTENER_INSTANCES) registryFailures.push(`expected ${EXPECTED_STEP_FASTENER_INSTANCES} rendered STEP-derived fastener/stud instances, got ${fasteners?.instanceCount}`);
+    if (fasteners?.familyCount !== EXPECTED_STEP_FASTENER_FAMILIES) registryFailures.push(`expected ${EXPECTED_STEP_FASTENER_FAMILIES} rendered STEP-derived family meshes, got ${fasteners?.familyCount}`);
+    if (fasteners?.geometryTier !== 'DIMENSIONALLY_RECONSTRUCTED') registryFailures.push(`wrong fastener geometry tier: ${fasteners?.geometryTier}`);
+    if (fasteners?.transformTier !== 'REFERENCE_POSITIONED') registryFailures.push(`fastener transforms must remain explicitly reference-positioned until OEM datums are proven; got ${fasteners?.transformTier}`);
+
+    const expectedFastenerCounts = new Map([
+      ['19258707', 20], ['12558840', 10], ['12560961', 16], ['11546600', 12],
+      ['12551926', 6], ['12557840', 1], ['11515758', 10], ['11516480', 2],
+      ['11514008', 4], ['11588949', 2], ['89017691', 3], ['11589264', 6]
+    ]);
+    const actualFastenerCounts = new Map();
+    for (const family of fasteners?.families || []) {
+      actualFastenerCounts.set(family.gmPart, (actualFastenerCounts.get(family.gmPart) || 0) + family.count);
+    }
+    for (const [gmPart, count] of expectedFastenerCounts) {
+      if (actualFastenerCounts.get(gmPart) !== count) {
+        registryFailures.push(`GM ${gmPart}: expected ${count} rendered instances, got ${actualFastenerCounts.get(gmPart) || 0}`);
+      }
+    }
+
+    if (registryFailures.length) throw new Error(`Engine/CAD architecture registry failed: ${registryFailures.join('; ')}`);
 
     console.log(`📊 Scene Objects Count: ${sceneAudit.objects.length}`);
     console.log(`🎨 Draw Calls: ${sceneAudit.stats?.render?.calls ?? 0} | Triangles: ${sceneAudit.stats?.render?.triangles ?? 0}`);
     console.log(`🔩 Engine registry: ${expected.pistons} pistons • ${expected.valves} valves • ${expected.lifters} lifters • ${expected.pushrods} pushrods • ${expected.rockerArms} rockers • ${expected.camshafts} camshaft • ${expected.turbos} turbos`);
     console.log(`🔥 Firing order: ${expected.firingOrder.join('-')}`);
     console.log(`🛞 GMT800 drive: main ${drive.mainBelt.ribs}-rib ${drive.mainBelt.gmPart} + A/C ${drive.acBelt.ribs}-rib ${drive.acBelt.gmPart}`);
+    console.log(`🧵 STEP CAD hardware: ${fasteners.instanceCount} visible threaded fastener/stud instances • ${fasteners.familyCount} instanced family meshes • 0 load errors`);
     if (sceneAudit.cad) {
-      console.log(`📐 CAD overlay: ${sceneAudit.cad.loadedCount ?? 0} loaded / ${sceneAudit.cad.registry?.catalogParts ?? 0} registered; OEM-verified coverage remains provenance-gated`);
+      console.log(`📐 OEM/supplier/scan CAD overlay: ${sceneAudit.cad.loadedCount ?? 0} loaded / ${sceneAudit.cad.registry?.catalogParts ?? 0} registered; OEM-verified coverage remains provenance-gated`);
     }
 
     await page.evaluate(() => {
@@ -228,7 +267,7 @@ async function run3DInspection() {
     const reportPath = path.join(artifactsDir, '3d_scene_report.json');
     fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
     console.log(`📝 Comprehensive 3D Audit Report saved -> ${reportPath}`);
-    console.log('✅ Visual, mechanical, front-drive and CAD-provenance verification complete!');
+    console.log('✅ Visual, mechanical, front-drive, STEP-fastener and CAD-provenance verification complete!');
   } catch (err) {
     console.error('❌ Inspection error:', err?.stack || err);
     console.error('Browser console tail:\n' + consoleLogs.slice(-30).join('\n'));
