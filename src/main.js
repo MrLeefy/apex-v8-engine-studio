@@ -182,6 +182,26 @@ class App {
     // the main six-rib drive from the dedicated four-rib A/C drive.
     installGmt800ReferenceFrontDrive(this.engine);
 
+    // EngineModel.registerPart currently owns inspector metadata. Preserve the
+    // engineering belt identities explicitly after registration so the audit
+    // and CAD handoff retain the actual GMT800 two-drive contract.
+    if (this.engine.serpentineBelt) {
+      this.engine.serpentineBelt.userData.belt = {
+        ribs: 6,
+        gmPart: '12637202/12637204',
+        catalogLengthMm: '2345 or 2365 depending equipment code',
+        drives: ['crank', 'water pump/fan', 'generator', 'power steering', 'idler', 'main tensioner']
+      };
+    }
+    if (this.engine.acDriveBelt) {
+      this.engine.acDriveBelt.userData.belt = {
+        ribs: 4,
+        gmPart: '12576447',
+        catalogLengthMm: 960,
+        drives: ['crank inner sheave', 'A/C compressor', 'A/C tensioner']
+      };
+    }
+
     this.scene.add(this.engine.group);
 
     // CAD-derived geometry is additive/replacement-by-proof. Missing assets do
