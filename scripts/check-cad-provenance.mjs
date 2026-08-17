@@ -5,6 +5,27 @@ import { CAD_ASSETS, CAD_SOURCE_TIERS, cadCoverageSummary } from '../src/cad/cad
 const errors = [];
 const seenIds = new Set();
 const seenPaths = new Set();
+const cadDir = path.resolve('public/cad');
+const exactSourceTiers = new Set([
+  CAD_SOURCE_TIERS.OEM_CAD,
+  CAD_SOURCE_TIERS.OEM_SUPPLIER_CAD,
+  CAD_SOURCE_TIERS.PHYSICAL_SCAN
+]);
+
+function glbSceneProvenance(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  if (buffer.length < 20 || buffer.toString('ascii', 0, 4) !== 'glTF') {
+    throw new Error('not a GLB 2.0 file');
+  }
+  const version = buffer.readUInt32LE(4);
+  if (version !== 2) throw new Error(`unsupported GLB version ${version}`);
+  const jsonLength = buffer.readUInt32LE(12);
+  const jsonType = buffer.readUInt32LE(16);
+  if (jsonType !== 0x4E4F534A) throw new Error('first GLB chunk is not JSON');
+  const json = JSON.parse(buffer.toString('utf8', 20, 20 + jsonLength).replace(/[\u0000\s]+$/g, ''));
+  const sceneIndex = Number.isInteger(json.scene) ? json.scene : 0;
+  return json.scenes?.[sceneIndex]?.extras?.cadProvenance || null;
+}
 
 for (const asset of CAD_ASSETS) {
   if (!asset.id) errors.push('asset missing id');
@@ -20,18 +41,77 @@ for (const asset of CAD_ASSETS) {
     seenPaths.add(asset.meshPath);
   }
 
-  if (asset.oemVerified && ![CAD_SOURCE_TIERS.OEM_CAD, CAD_SOURCE_TIERS.OEM_SUPPLIER_CAD, CAD_SOURCE_TIERS.PHYSICAL_SCAN].includes(asset.sourceTier)) {
+  if (asset.oemVerified && !exactSourceTiers.has(asset.sourceTier)) {
     errors.push(`${asset.id}: oemVerified cannot be true for source tier ${asset.sourceTier}`);
   }
 }
 
-const cadDir = path.resolve('public/cad');
 const present = [];
 const missing = [];
+const generatedCad = [];
+
 for (const asset of CAD_ASSETS) {
   if (!asset.meshPath) continue;
-  const local = path.join(cadDir, asset.meshPath.replace(/^\/cad\//, ''));
-  (fs.existsSync(local) ? present : missing).push(asset.id);
+  const relativeGlb = asset.meshPath.replace(/^\/cad\//, '');
+  const glbPath = path.join(cadDir, relativeGlb);
+  const exists = fs.existsSync(glbPath);
+  (exists ? present : missing).push(asset.id);
+
+  // DIMENSIONALLY_RECONSTRUCTED entries are generated from traceable published
+  // dimensions by the CadQuery/OpenCascade toolchain. CI requires BOTH a STEP
+  // B-rep and the web GLB tessellation, then inspects the GLB's embedded
+  // provenance so a random file cannot masquerade as the registered part.
+  if (asset.sourceTier === CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED) {
+    const stepPath = glbPath.replace(/\.glb$/i, '.step');
+    if (!exists) {
+      errors.push(`${asset.id}: generated dimensioned GLB is missing (${relativeGlb})`);
+      continue;
+    }
+    if (!fs.existsSync(stepPath)) {
+      errors.push(`${asset.id}: generated STEP B-rep is missing (${path.basename(stepPath)})`);
+      continue;
+    }
+    if (fs.statSync(stepPath).size < 1000) errors.push(`${asset.id}: STEP B-rep is suspiciously small`);
+    if (fs.statSync(glbPath).size < 1000) errors.push(`${asset.id}: GLB tessellation is suspiciously small`);
+
+    try {
+      const p = glbSceneProvenance(glbPath);
+      if (!p) throw new Error('missing scene.extras.cadProvenance');
+      if (String(p.gmPart) !== String(asset.gmPart)) throw new Error(`GM part mismatch ${p.gmPart} != ${asset.gmPart}`);
+      if (p.sourceTier !== CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED) throw new Error(`wrong source tier ${p.sourceTier}`);
+      if (p.units !== 'mm') throw new Error(`expected mm source units, got ${p.units}`);
+      if (!p.nominal?.diameterMm || !p.nominal?.pitchMm || !p.nominal?.underHeadLengthMm) throw new Error('missing nominal diameter/pitch/length metadata');
+      if (p.geometryVerified === true) throw new Error('dimensionally reconstructed part must not claim OEM geometryVerified=true');
+      if (p.assemblyTransformVerified === true) throw new Error('generated loose fastener must not claim verified assembly transform');
+      generatedCad.push({
+        id: asset.id,
+        gmPart: asset.gmPart,
+        stepBytes: fs.statSync(stepPath).size,
+        glbBytes: fs.statSync(glbPath).size,
+        nominal: p.nominal
+      });
+    } catch (error) {
+      errors.push(`${asset.id}: invalid generated GLB provenance: ${error.message}`);
+    }
+  }
+}
+
+// The availability manifest controls which loose CAD assets are actually loaded
+// into the assembled engine. Generated fasteners stay out until their individual
+// engine transforms are registered rather than appearing at the origin.
+const manifestPath = path.join(cadDir, 'cad-assets.json');
+if (!fs.existsSync(manifestPath)) {
+  errors.push('public/cad/cad-assets.json is missing');
+} else {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.assets)) errors.push('cad-assets.json has an invalid schema');
+    for (const id of manifest.assets || []) {
+      if (!seenIds.has(String(id))) errors.push(`cad-assets.json references unknown asset id ${id}`);
+    }
+  } catch (error) {
+    errors.push(`cad-assets.json cannot be parsed: ${error.message}`);
+  }
 }
 
 const summary = cadCoverageSummary();
@@ -40,6 +120,8 @@ console.log(JSON.stringify({
   ...summary,
   cadFilesPresent: present.length,
   cadFilesMissing: missing.length,
+  dimensionallyReconstructedBrepFamilies: generatedCad.length,
+  generatedCad,
   present,
   missing
 }, null, 2));
@@ -49,4 +131,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log('\nCAD provenance registry is structurally valid.');
+console.log(`\nCAD provenance audit passed: ${generatedCad.length} published-dimension fastener families have STEP B-reps + validated GLBs.`);
