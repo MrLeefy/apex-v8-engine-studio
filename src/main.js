@@ -6,6 +6,7 @@ import { UIController } from './uiController.js';
 import { ThreeDebugBridge } from './threeDebugBridge.js';
 import { CadAssetOverlay } from './cad/CadAssetOverlay.js';
 import { installGmt800ReferenceFrontDrive } from './cad/Gmt800ReferenceFrontDrive.js';
+import { refineGmt800FrontDrive } from './cad/Gmt800FrontDriveRefinement.js';
 
 /**
  * 2006 Chevrolet Tahoe 5.3L Vortec 5300 interactive engine studio.
@@ -16,6 +17,7 @@ import { installGmt800ReferenceFrontDrive } from './cad/Gmt800ReferenceFrontDriv
  * CAD strategy:
  * - EngineModel is the mechanically/dimensionally grounded procedural fallback.
  * - The GMT800-specific reference front drive corrects the generic accessory layout.
+ * - The OE-photo refinement fixes shared generator/P.S. bracket topology and routing.
  * - CadAssetOverlay loads provenance-verified CAD-derived parts when available.
  * - A third-party mesh can never silently replace the fallback as "OEM CAD".
  */
@@ -177,10 +179,10 @@ class App {
     this.sound = new SoundEngine();
     this.engine = new EngineModel();
 
-    // Replace the old generic front-dress fallback before the engine enters the
-    // scene. This fixes the GMT800-specific accessory placement and separates
-    // the main six-rib drive from the dedicated four-rib A/C drive.
+    // Replace the old generic front dress, then refine it against genuine GM
+    // bracket imagery and a real GMT800 Tahoe front-engine reference.
     installGmt800ReferenceFrontDrive(this.engine);
+    refineGmt800FrontDrive(this.engine);
 
     // EngineModel.registerPart currently owns inspector metadata. Preserve the
     // engineering belt identities explicitly after registration so the audit
