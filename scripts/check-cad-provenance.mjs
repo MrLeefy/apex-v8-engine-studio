@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import path from 'node:path';
+import path from 'path';
 import { CAD_ASSETS, CAD_SOURCE_TIERS, cadCoverageSummary } from '../src/cad/cadAssetRegistry.js';
 
 const errors = [];
@@ -57,10 +57,6 @@ for (const asset of CAD_ASSETS) {
   const exists = fs.existsSync(glbPath);
   (exists ? present : missing).push(asset.id);
 
-  // DIMENSIONALLY_RECONSTRUCTED entries are generated from traceable published
-  // dimensions by the CadQuery/OpenCascade toolchain. CI requires BOTH a STEP
-  // B-rep and the web GLB tessellation, then inspects the GLB's embedded
-  // provenance so a random file cannot masquerade as the registered part.
   if (asset.sourceTier === CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED) {
     const stepPath = glbPath.replace(/\.glb$/i, '.step');
     if (!exists) {
@@ -80,12 +76,19 @@ for (const asset of CAD_ASSETS) {
       if (String(p.gmPart) !== String(asset.gmPart)) throw new Error(`GM part mismatch ${p.gmPart} != ${asset.gmPart}`);
       if (p.sourceTier !== CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED) throw new Error(`wrong source tier ${p.sourceTier}`);
       if (p.units !== 'mm') throw new Error(`expected mm source units, got ${p.units}`);
-      if (!p.nominal?.diameterMm || !p.nominal?.pitchMm || !p.nominal?.underHeadLengthMm) throw new Error('missing nominal diameter/pitch/length metadata');
+      if (!p.nominal?.diameterMm || !p.nominal?.pitchMm) throw new Error('missing nominal diameter/pitch metadata');
+
+      const isBolt = Number.isFinite(p.nominal?.underHeadLengthMm);
+      const isStud = Number.isFinite(p.nominal?.totalLengthMm) && Number.isFinite(p.nominal?.threadLengthAMm) && Number.isFinite(p.nominal?.threadLengthBMm);
+      if (!isBolt && !isStud) throw new Error('missing bolt under-head length or double-ended stud length metadata');
+      if (isStud && p.nominal.threadLengthAMm + p.nominal.threadLengthBMm > p.nominal.totalLengthMm) throw new Error('stud thread spans exceed overall length');
+
       if (p.geometryVerified === true) throw new Error('dimensionally reconstructed part must not claim OEM geometryVerified=true');
       if (p.assemblyTransformVerified === true) throw new Error('generated loose fastener must not claim verified assembly transform');
       generatedCad.push({
         id: asset.id,
         gmPart: asset.gmPart,
+        form: isStud ? 'double-ended stud' : 'bolt/plug',
         stepBytes: fs.statSync(stepPath).size,
         glbBytes: fs.statSync(glbPath).size,
         nominal: p.nominal
@@ -96,9 +99,6 @@ for (const asset of CAD_ASSETS) {
   }
 }
 
-// The availability manifest controls which loose CAD assets are actually loaded
-// into the assembled engine. Generated fasteners stay out until their individual
-// engine transforms are registered rather than appearing at the origin.
 const manifestPath = path.join(cadDir, 'cad-assets.json');
 if (!fs.existsSync(manifestPath)) {
   errors.push('public/cad/cad-assets.json is missing');
@@ -131,4 +131,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`\nCAD provenance audit passed: ${generatedCad.length} published-dimension fastener families have STEP B-reps + validated GLBs.`);
+console.log(`\nCAD provenance audit passed: ${generatedCad.length} published-dimension fastener/stud families have STEP B-reps + validated GLBs.`);
