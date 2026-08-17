@@ -19,6 +19,7 @@ export class ReferenceCadFasteners {
     this.families = [];
     this.errors = [];
     this.ready = false;
+    this.geometryCache = new Map();
     window.__REFERENCE_FASTENERS__ = this;
   }
 
@@ -50,24 +51,27 @@ export class ReferenceCadFasteners {
       transformTier: 'REFERENCE_POSITIONED',
       familyCount: this.families.length,
       instanceCount: this.families.reduce((n, item) => n + item.count, 0),
-      families: this.families.map(item => ({ id: item.id, gmPart: item.gmPart, count: item.count })),
+      families: this.families.map(item => ({ id: item.id, gmPart: item.gmPart, count: item.count, parent: item.mesh.parent?.name || null })),
       errors: [...this.errors]
     };
   }
 
   async loadGeometry(url, id) {
-    try {
-      const gltf = await this.loader.loadAsync(url);
+    if (this.geometryCache.has(url)) return (await this.geometryCache.get(url)).clone();
+    const promise = this.loader.loadAsync(url).then(gltf => {
       let found = null;
       gltf.scene.traverse(obj => {
         if (!found && obj.isMesh && obj.geometry) found = obj;
       });
       if (!found) throw new Error('GLB contains no mesh geometry');
       return found.geometry.clone();
-    } catch (error) {
+    }).catch(error => {
       this.errors.push({ id, path: url, message: error.message });
+      this.geometryCache.delete(url);
       throw error;
-    }
+    });
+    this.geometryCache.set(url, promise);
+    return (await promise).clone();
   }
 
   async createFamily(options) {
@@ -128,74 +132,81 @@ export class ReferenceCadFasteners {
   }
 
   async installRockerBolts() {
-    const placements = [];
-    for (const event of this.engine.valveEvents || []) {
-      for (const rocker of event.rockers || []) {
-        const axis = event.axis.vec.clone().normalize();
-        placements.push(localBolt(rocker.group.position.clone().addScaledVector(axis, -0.22), axis));
+    for (const bank of ['L', 'R']) {
+      const parent = bank === 'L' ? this.engine.subassemblies.leftHead : this.engine.subassemblies.rightHead;
+      if (!parent) continue;
+      const placements = [];
+      for (const event of this.engine.valveEvents || []) {
+        const eventBank = event.cylinderNo % 2 === 1 ? 'L' : 'R';
+        if (eventBank !== bank) continue;
+        for (const rocker of event.rockers || []) {
+          const axisWorld = event.axis.vec.clone().normalize();
+          const worldTip = rocker.group.position.clone().addScaledVector(axisWorld, -0.22);
+          placements.push(worldBoltToParent(parent, worldTip, axisWorld));
+        }
       }
+      await this.createFamily({ id: `rocker_bolt_${bank}`, gmPart: '12560961', path: '/cad/12560961-rocker-bolt.glb', parent, placements });
     }
-    return this.createFamily({ id: 'rocker_bolt', gmPart: '12560961', path: '/cad/12560961-rocker-bolt.glb', placements });
   }
 
   async installExhaustManifoldBolts() {
-    const placements = [];
     const deck = this.engine.spec.geometry.deckHeightNominalIn / this.engine.spec.scene.inchesPerUnit;
     for (const bank of ['L', 'R']) {
+      const parent = bank === 'L' ? this.engine.subassemblies.leftExhaust : this.engine.subassemblies.rightExhaust;
+      if (!parent) continue;
       const bankAxis = this.engine.axisForBank(bank).vec.clone().normalize();
       const tangent = new THREE.Vector3(-bankAxis.y, bankAxis.x, 0);
       const exhaustOut = tangent.multiplyScalar(bank === 'L' ? 1 : -1).normalize();
+      const placements = [];
       for (const z of [-1.92, -1.16, -0.38, 0.38, 1.16, 1.92]) {
-        const base = bankAxis.clone().multiplyScalar(deck + 0.35)
-          .addScaledVector(exhaustOut, 0.48)
+        const worldTip = bankAxis.clone().multiplyScalar(deck + 0.35)
+          .addScaledVector(exhaustOut, 0.30)
           .add(new THREE.Vector3(0, 0, z));
-        base.addScaledVector(exhaustOut, -0.18);
-        placements.push(localBolt(base, exhaustOut));
+        placements.push(worldBoltToParent(parent, worldTip, exhaustOut));
       }
+      await this.createFamily({ id: `exhaust_manifold_bolt_${bank}`, gmPart: '11546600', path: '/cad/11546600-exhaust-bolt.glb', parent, placements });
     }
-    return this.createFamily({ id: 'exhaust_manifold_bolt', gmPart: '11546600', path: '/cad/11546600-exhaust-bolt.glb', placements });
   }
 
   async installWaterPumpBolts() {
+    const parent = this.engine.subassemblies.frontDrive || this.group;
     const stations = [
       [-0.63, 0.56], [-0.43, 1.12], [-0.18, 0.33],
       [0.18, 0.33], [0.43, 1.12], [0.63, 0.56]
     ];
     const tipZ = -2.80 + 83 / 101.6;
-    const placements = stations.map(([x, y]) => localBolt(new THREE.Vector3(x, y, tipZ), new THREE.Vector3(0, 0, -1)));
-    return this.createFamily({ id: 'water_pump_bolt', gmPart: '12551926', path: '/cad/12551926-water-pump-bolt.glb', placements });
+    const placements = stations.map(([x, y]) => worldBoltToParent(parent, new THREE.Vector3(x, y, tipZ), new THREE.Vector3(0, 0, -1)));
+    return this.createFamily({ id: 'water_pump_bolt', gmPart: '12551926', path: '/cad/12551926-water-pump-bolt.glb', parent, placements });
   }
 
   async installBalancerBolt() {
+    const parent = this.engine.subassemblies.frontDrive || this.group;
     const tipZ = -3.16 + 103 / 101.6;
     return this.createFamily({
       id: 'crank_balancer_bolt',
       gmPart: '12557840',
       path: '/cad/12557840-balancer-bolt.glb',
-      placements: [localBolt(new THREE.Vector3(0, -0.66, tipZ), new THREE.Vector3(0, 0, -1))]
+      parent,
+      placements: [worldBoltToParent(parent, new THREE.Vector3(0, -0.66, tipZ), new THREE.Vector3(0, 0, -1))]
     });
   }
 
   async installValleyBolts() {
+    const parent = this.engine.subassemblies.block || this.group;
     const placements = [];
     for (const x of [-0.42, 0.42]) {
       for (const z of [-1.78, -0.89, 0, 0.89, 1.78]) {
-        placements.push(localBolt(new THREE.Vector3(x, 1.12, z), new THREE.Vector3(0, 1, 0)));
+        placements.push(worldBoltToParent(parent, new THREE.Vector3(x, 1.12, z), new THREE.Vector3(0, 1, 0)));
       }
     }
-    return this.createFamily({ id: 'valley_cover_bolt', gmPart: '11515758', path: '/cad/11515758-valley-cover-bolt.glb', placements });
+    return this.createFamily({ id: 'valley_cover_bolt', gmPart: '11515758', path: '/cad/11515758-valley-cover-bolt.glb', parent, placements });
   }
 
   async installWaterPumpInletBolts() {
-    return this.createFamily({
-      id: 'water_pump_inlet_bolt',
-      gmPart: '11516480',
-      path: '/cad/11516480-water-pump-inlet-bolt.glb',
-      placements: [
-        localBolt(new THREE.Vector3(-0.73, 0.43, -2.59), new THREE.Vector3(0, 0, -1)),
-        localBolt(new THREE.Vector3(-0.45, 0.25, -2.59), new THREE.Vector3(0, 0, -1))
-      ]
-    });
+    const parent = this.engine.subassemblies.frontDrive || this.group;
+    const world = [new THREE.Vector3(-0.73, 0.43, -2.59), new THREE.Vector3(-0.45, 0.25, -2.59)];
+    const placements = world.map(p => worldBoltToParent(parent, p, new THREE.Vector3(0, 0, -1)));
+    return this.createFamily({ id: 'water_pump_inlet_bolt', gmPart: '11516480', path: '/cad/11516480-water-pump-inlet-bolt.glb', parent, placements });
   }
 
   async installCoolantBleedBolts() {
@@ -207,37 +218,38 @@ export class ReferenceCadFasteners {
   }
 
   async installBlockDrainPlugs() {
-    return this.createFamily({
-      id: 'block_coolant_drain_plug',
-      gmPart: '11588949',
-      path: '/cad/11588949-block-drain-plug.glb',
-      placements: [
-        localBolt(new THREE.Vector3(-1.42, 0.18, 0.78), new THREE.Vector3(-1, 0, 0)),
-        localBolt(new THREE.Vector3(1.42, 0.18, 0.78), new THREE.Vector3(1, 0, 0))
-      ]
-    });
+    const parent = this.engine.subassemblies.block || this.group;
+    const placements = [
+      worldBoltToParent(parent, new THREE.Vector3(-1.42, 0.18, 0.78), new THREE.Vector3(-1, 0, 0)),
+      worldBoltToParent(parent, new THREE.Vector3(1.42, 0.18, 0.78), new THREE.Vector3(1, 0, 0))
+    ];
+    return this.createFamily({ id: 'block_coolant_drain_plug', gmPart: '11588949', path: '/cad/11588949-block-drain-plug.glb', parent, placements });
   }
 
   async installThrottleStuds() {
-    const intake = this.engine.subassemblies.intakePlenum || this.group;
+    const parent = this.engine.subassemblies.intakePlenum || this.group;
     const placements = [
       [-0.27, 2.30, -2.02], [0.27, 2.30, -2.02], [0, 2.72, -2.02]
-    ].map(coords => localBolt(new THREE.Vector3(...coords), new THREE.Vector3(0, 0, -1)));
-    return this.createFamily({ id: 'throttle_body_stud', gmPart: '89017691', path: '/cad/89017691-throttle-body-stud.glb', parent: intake, placements });
+    ].map(coords => worldBoltToParent(parent, new THREE.Vector3(...coords), new THREE.Vector3(0, 0, -1)));
+    return this.createFamily({ id: 'throttle_body_stud', gmPart: '89017691', path: '/cad/89017691-throttle-body-stud.glb', parent, placements });
   }
 
   async installExhaustPipeStuds() {
-    const placements = [];
     for (const side of [-1, 1]) {
+      const bank = side < 0 ? 'L' : 'R';
+      const parent = bank === 'L' ? this.engine.subassemblies.leftExhaust : this.engine.subassemblies.rightExhaust;
+      if (!parent) continue;
+      const placements = [];
       const center = new THREE.Vector3(side * 2.25, 0.91, 1.62);
       const axis = new THREE.Vector3(side * 0.25, -0.92, 0.30).normalize();
       for (let i = 0; i < 3; i++) {
         const a = i / 3 * Math.PI * 2;
         const radial = new THREE.Vector3(0, Math.cos(a) * 0.16, Math.sin(a) * 0.16);
-        placements.push(localBolt(center.clone().add(radial).addScaledVector(axis, -0.16), axis));
+        const worldTip = center.clone().add(radial).addScaledVector(axis, -0.16);
+        placements.push(worldBoltToParent(parent, worldTip, axis));
       }
+      await this.createFamily({ id: `exhaust_pipe_stud_${bank}`, gmPart: '11589264', path: '/cad/11589264-exhaust-pipe-stud.glb', parent, placements });
     }
-    return this.createFamily({ id: 'exhaust_pipe_stud', gmPart: '11589264', path: '/cad/11589264-exhaust-pipe-stud.glb', placements });
   }
 }
 
@@ -247,4 +259,13 @@ function quaternionTo(axis) {
 
 function localBolt(position, axis) {
   return { position, axis: axis.clone().normalize() };
+}
+
+function worldBoltToParent(parent, worldPosition, worldAxis) {
+  parent.updateWorldMatrix(true, false);
+  const localPosition = parent.worldToLocal(worldPosition.clone());
+  const worldQ = new THREE.Quaternion();
+  parent.getWorldQuaternion(worldQ);
+  const localAxis = worldAxis.clone().normalize().applyQuaternion(worldQ.clone().invert()).normalize();
+  return localBolt(localPosition, localAxis);
 }
