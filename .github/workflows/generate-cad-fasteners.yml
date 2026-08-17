@@ -59,4 +59,9 @@ jobs:
             exit 0
           fi
           git commit -m "generate CadQuery STEP solids for GM-dimensioned fasteners"
+          # The modeling branch may advance while OpenCascade is generating the
+          # solids. Rebase this isolated generated-output commit onto the latest
+          # branch head before pushing rather than force-pushing or losing work.
+          git fetch origin agent/2006-tahoe-53-l59-rebuild
+          git rebase origin/agent/2006-tahoe-53-l59-rebuild
           git push origin HEAD:agent/2006-tahoe-53-l59-rebuild
