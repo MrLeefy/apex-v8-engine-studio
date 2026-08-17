@@ -30,7 +30,6 @@ async function run3DInspection() {
   page.on('console', msg => {
     const line = `[Browser ${msg.type()}]: ${msg.text()}`;
     consoleLogs.push(line);
-    // Ignore ordinary missing favicon/resource noise; uncaught JS errors are tracked separately.
     if (msg.type() === 'error' && !msg.text().includes('404')) console.error(line);
   });
   page.on('pageerror', err => {
@@ -64,14 +63,25 @@ async function run3DInspection() {
       const rockerCount = events.reduce((sum, event) => sum + (event.rockers?.length || 0), 0);
       const lifterCount = events.reduce((sum, event) => sum + (event.lifters?.length || 0), 0);
       const eventValveCount = events.reduce((sum, event) => sum + (event.valves?.length || 0), 0);
+      const objects = bridge.list_scene_objects();
+      const rendererStats = bridge.get_renderer_stats();
 
       return {
-        state: bridge.capture_scene_state(),
-        objects: bridge.list_scene_objects(),
-        stats: bridge.get_renderer_stats(),
+        state: {
+          timestamp: new Date().toISOString(),
+          renderer: rendererStats,
+          camera: {
+            position: { x: window.__CAMERA__.position.x, y: window.__CAMERA__.position.y, z: window.__CAMERA__.position.z },
+            fov: window.__CAMERA__.fov,
+            aspect: window.__CAMERA__.aspect
+          },
+          objectsCount: objects.length
+        },
+        objects,
+        stats: rendererStats,
         collisionAudit: {
           mode: 'deferred',
-          reason: 'Run targeted subassembly collision checks separately; legacy global sweep is quadratic.'
+          reason: 'Targeted subassembly collision checks should be used; legacy global sweep is O(n²).'
         },
         engine: {
           name: engine.group?.name || null,
@@ -110,7 +120,6 @@ async function run3DInspection() {
     console.log(`🔩 Engine registry: ${expected.pistons} pistons • ${expected.valves} valves • ${expected.lifters} lifters • ${expected.pushrods} pushrods • ${expected.rockerArms} rockers • ${expected.camshafts} camshaft • ${expected.turbos} turbos`);
     console.log(`🔥 Firing order: ${expected.firingOrder.join('-')}`);
 
-    // Exercise exactly 720 crank degrees using deterministic update steps.
     await page.evaluate(() => {
       const engine = window.__ENGINE__;
       const rpm = 1200;
