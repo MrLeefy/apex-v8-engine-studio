@@ -7,19 +7,18 @@ import { ThreeDebugBridge } from './threeDebugBridge.js';
 import { CadAssetOverlay } from './cad/CadAssetOverlay.js';
 import { installGmt800ReferenceFrontDrive } from './cad/Gmt800ReferenceFrontDrive.js';
 import { refineGmt800FrontDrive } from './cad/Gmt800FrontDriveRefinement.js';
+import { ReferenceCadFasteners } from './cad/ReferenceCadFasteners.js';
 
 /**
  * 2006 Chevrolet Tahoe 5.3L Vortec 5300 interactive engine studio.
- * The scene is centered on the real Gen III pushrod engine model and supports
- * orbit inspection, exploded assembly, translucent cutaway and synchronized
- * crank/piston/valvetrain animation.
  *
- * CAD strategy:
- * - EngineModel is the mechanically/dimensionally grounded procedural fallback.
- * - The GMT800-specific reference front drive corrects the generic accessory layout.
- * - The OE-photo refinement fixes shared generator/P.S. bracket topology and routing.
- * - CadAssetOverlay loads provenance-verified CAD-derived parts when available.
- * - A third-party mesh can never silently replace the fallback as "OEM CAD".
+ * Geometry fidelity is deliberately layered:
+ * 1) mechanically grounded engine fallback;
+ * 2) GMT800 OE-reference front-dress reconstruction;
+ * 3) STEP-derived catalog-dimension fasteners with reference placements;
+ * 4) provenance-verified OEM/supplier/scan CAD assets when available.
+ *
+ * No lower tier is silently relabeled as OEM CAD.
  */
 class App {
   constructor() {
@@ -34,6 +33,7 @@ class App {
     this.ui = null;
     this.debugBridge = null;
     this.cadOverlay = null;
+    this.referenceCadFasteners = null;
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
     this.hoveredMesh = null;
@@ -179,14 +179,10 @@ class App {
     this.sound = new SoundEngine();
     this.engine = new EngineModel();
 
-    // Replace the old generic front dress, then refine it against genuine GM
-    // bracket imagery and a real GMT800 Tahoe front-engine reference.
     installGmt800ReferenceFrontDrive(this.engine);
     refineGmt800FrontDrive(this.engine);
 
-    // EngineModel.registerPart currently owns inspector metadata. Preserve the
-    // engineering belt identities explicitly after registration so the audit
-    // and CAD handoff retain the actual GMT800 two-drive contract.
+    // Preserve engineering metadata after legacy inspector registration.
     if (this.engine.serpentineBelt) {
       this.engine.serpentineBelt.userData.belt = {
         ribs: 6,
@@ -206,8 +202,13 @@ class App {
 
     this.scene.add(this.engine.group);
 
-    // CAD-derived geometry is additive/replacement-by-proof. Missing assets do
-    // not break the studio, while verified CAD can replace procedural groups.
+    // STEP-derived fasteners are rendered via shared instanced geometry. Their
+    // CAD dimensions are source-grounded; mounting transforms remain explicitly
+    // reference-positioned until a production datum/scan proves them.
+    this.referenceCadFasteners = new ReferenceCadFasteners(this.engine);
+    this.referenceCadFasteners.install().catch(error => console.warn('[CAD fasteners] install failed', error));
+
+    // Separately, verified OEM/supplier/scan CAD assets may replace fallbacks.
     this.cadOverlay = new CadAssetOverlay(this);
     this.cadOverlay.loadAvailable().catch(error => console.warn('[CAD] overlay load failed', error));
 
@@ -215,6 +216,7 @@ class App {
     this.debugBridge = new ThreeDebugBridge(this);
 
     window.__CAD_REPORT__ = () => this.cadOverlay?.getReport();
+    window.__FASTENER_CAD_REPORT__ = () => this.referenceCadFasteners?.report();
   }
 
   initEventListeners() {
