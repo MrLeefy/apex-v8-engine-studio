@@ -5,6 +5,7 @@ import { EngineModel } from './engineModel.js';
 import { UIController } from './uiController.js';
 import { ThreeDebugBridge } from './threeDebugBridge.js';
 import { CadAssetOverlay } from './cad/CadAssetOverlay.js';
+import { installGmt800ReferenceFrontDrive } from './cad/Gmt800ReferenceFrontDrive.js';
 
 /**
  * 2006 Chevrolet Tahoe 5.3L Vortec 5300 interactive engine studio.
@@ -14,6 +15,7 @@ import { CadAssetOverlay } from './cad/CadAssetOverlay.js';
  *
  * CAD strategy:
  * - EngineModel is the mechanically/dimensionally grounded procedural fallback.
+ * - The GMT800-specific reference front drive corrects the generic accessory layout.
  * - CadAssetOverlay loads provenance-verified CAD-derived parts when available.
  * - A third-party mesh can never silently replace the fallback as "OEM CAD".
  */
@@ -174,6 +176,12 @@ class App {
   initSubsystems() {
     this.sound = new SoundEngine();
     this.engine = new EngineModel();
+
+    // Replace the old generic front-dress fallback before the engine enters the
+    // scene. This fixes the GMT800-specific accessory placement and separates
+    // the main six-rib drive from the dedicated four-rib A/C drive.
+    installGmt800ReferenceFrontDrive(this.engine);
+
     this.scene.add(this.engine.group);
 
     // CAD-derived geometry is additive/replacement-by-proof. Missing assets do
