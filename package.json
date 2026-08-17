@@ -7,7 +7,8 @@
     "dev": "vite --port 5173 --host",
     "build": "vite build",
     "preview": "vite preview",
-    "audit:3d": "node scripts/inspect-3d-scene.js"
+    "audit:3d": "node scripts/inspect-3d-scene.js",
+    "audit:cad": "node scripts/check-cad-provenance.mjs"
   },
   "dependencies": {
     "three": "^0.160.0"
