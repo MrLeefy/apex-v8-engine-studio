@@ -15,6 +15,7 @@ async function run3DInspection() {
       '--disable-setuid-sandbox',
       '--use-gl=angle',
       '--use-angle=swiftshader',
+      '--enable-unsafe-swiftshader',
       '--disable-dev-shm-usage'
     ]
   });
@@ -29,7 +30,8 @@ async function run3DInspection() {
   page.on('console', msg => {
     const line = `[Browser ${msg.type()}]: ${msg.text()}`;
     consoleLogs.push(line);
-    if (msg.type() === 'error') console.error(line);
+    // Ignore ordinary missing favicon/resource noise; uncaught JS errors are tracked separately.
+    if (msg.type() === 'error' && !msg.text().includes('404')) console.error(line);
   });
   page.on('pageerror', err => {
     const line = err?.stack || err?.toString() || String(err);
@@ -57,9 +59,12 @@ async function run3DInspection() {
       const engine = window.__ENGINE__;
       if (!bridge || !engine) return { error: 'ThreeDebugBridge or EngineModel not attached' };
 
-      // Keep the CI smoke/visual audit responsive. The debug bridge's legacy
-      // check_mesh_collisions() is intentionally NOT called here because it does
-      // an O(n²) all-scene pairwise sweep and can stall on this much denser engine.
+      const events = Array.isArray(engine.valveEvents) ? engine.valveEvents : [];
+      const pushrodCount = events.reduce((sum, event) => sum + (event.pushrods?.length || 0), 0);
+      const rockerCount = events.reduce((sum, event) => sum + (event.rockers?.length || 0), 0);
+      const lifterCount = events.reduce((sum, event) => sum + (event.lifters?.length || 0), 0);
+      const eventValveCount = events.reduce((sum, event) => sum + (event.valves?.length || 0), 0);
+
       return {
         state: bridge.capture_scene_state(),
         objects: bridge.list_scene_objects(),
@@ -73,11 +78,13 @@ async function run3DInspection() {
           inspectableParts: engine.inspectableParts?.length || 0,
           pistons: engine.pistons?.length || 0,
           valves: engine.valves?.length || 0,
-          pushrods: engine.pushrods?.length || 0,
-          rockerArms: engine.rockerArms?.length || 0,
+          eventValves: eventValveCount,
+          lifters: lifterCount,
+          pushrods: pushrodCount,
+          rockerArms: rockerCount,
           camshafts: engine.camshafts?.length || 0,
           turbos: engine.turbos?.length || 0,
-          firingOrder: engine.specs?.firingOrder || null
+          firingOrder: engine.spec?.architecture?.firingOrder || null
         }
       };
     });
@@ -89,16 +96,19 @@ async function run3DInspection() {
     const expected = sceneAudit.engine;
     const registryFailures = [];
     if (expected.pistons !== 8) registryFailures.push(`expected 8 pistons, got ${expected.pistons}`);
-    if (expected.valves !== 16) registryFailures.push(`expected 16 valves, got ${expected.valves}`);
+    if (expected.valves !== 16 || expected.eventValves !== 16) registryFailures.push(`expected 16 valves, got ${expected.valves}/${expected.eventValves}`);
+    if (expected.lifters !== 16) registryFailures.push(`expected 16 lifters, got ${expected.lifters}`);
     if (expected.pushrods !== 16) registryFailures.push(`expected 16 pushrods, got ${expected.pushrods}`);
     if (expected.rockerArms !== 16) registryFailures.push(`expected 16 rocker arms, got ${expected.rockerArms}`);
     if (expected.camshafts !== 1) registryFailures.push(`expected 1 camshaft, got ${expected.camshafts}`);
     if (expected.turbos !== 0) registryFailures.push(`expected 0 turbos, got ${expected.turbos}`);
+    if (expected.firingOrder?.join('-') !== '1-8-7-2-6-5-4-3') registryFailures.push(`wrong firing order: ${expected.firingOrder}`);
     if (registryFailures.length) throw new Error(`Engine architecture registry failed: ${registryFailures.join('; ')}`);
 
     console.log(`📊 Scene Objects Count: ${sceneAudit.objects.length}`);
     console.log(`🎨 Draw Calls: ${sceneAudit.stats?.render?.calls ?? 0} | Triangles: ${sceneAudit.stats?.render?.triangles ?? 0}`);
-    console.log(`🔩 Engine registry: ${expected.pistons} pistons • ${expected.valves} valves • ${expected.pushrods} pushrods • ${expected.rockerArms} rockers • ${expected.camshafts} camshaft • ${expected.turbos} turbos`);
+    console.log(`🔩 Engine registry: ${expected.pistons} pistons • ${expected.valves} valves • ${expected.lifters} lifters • ${expected.pushrods} pushrods • ${expected.rockerArms} rockers • ${expected.camshafts} camshaft • ${expected.turbos} turbos`);
+    console.log(`🔥 Firing order: ${expected.firingOrder.join('-')}`);
 
     // Exercise exactly 720 crank degrees using deterministic update steps.
     await page.evaluate(() => {
