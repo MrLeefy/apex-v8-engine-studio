@@ -55,18 +55,34 @@ export const CAD_ASSETS = Object.freeze([
   { id: 'main_drive_belt', label: 'Main 6-rib fan/water-pump/generator/P/S belt', gmPart: '12637202/12637204', quantity: 1, sourceTier: CAD_SOURCE_TIERS.PROCEDURAL_FALLBACK, meshPath: '/cad/main-drive-belt.glb', notes: 'Catalog shows equipment-code dependent 2345 mm or 2365 mm belt variants.', oemVerified: false },
   { id: 'ac_drive_belt', label: 'Separate 4-rib A/C compressor belt', gmPart: '12576447', quantity: 1, sourceTier: CAD_SOURCE_TIERS.PROCEDURAL_FALLBACK, meshPath: '/cad/12576447-ac-belt.glb', notes: '960 mm, 4-rib catalog listing for applicable option codes.', oemVerified: false },
 
-  // --- Exact fastener identities where catalog dimensions are published -----------
+  // --- Published-dimension fasteners reconstructed as real STEP B-reps ------------
   { id: 'head_bolt_short', label: 'Cylinder-head short bolt M8x1.25x45', gmPart: '12558840', quantity: 10, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/12558840-head-bolt-short.glb', oemVerified: false },
   { id: 'head_bolt_long', label: 'Cylinder-head bolt M11x2x100', gmPart: '19258707', quantity: 20, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/19258707-head-bolt-long.glb', oemVerified: false },
   { id: 'exhaust_manifold_bolt', label: 'Exhaust-manifold bolt M8x1.25x30.7', gmPart: '11546600', quantity: 12, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/11546600-exhaust-bolt.glb', oemVerified: false },
   { id: 'rocker_bolt', label: 'Rocker pivot support bolt M8x1.25x52.5', gmPart: '12560961', quantity: 16, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/12560961-rocker-bolt.glb', oemVerified: false },
   { id: 'water_pump_bolt', label: 'Water-pump bolt M8x1.25x83', gmPart: '12551926', quantity: 6, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/12551926-water-pump-bolt.glb', oemVerified: false },
-  { id: 'crank_balancer_bolt', label: 'Crankshaft balancer bolt M16x2x103', gmPart: '12557840', quantity: 1, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/12557840-balancer-bolt.glb', oemVerified: false }
+  { id: 'crank_balancer_bolt', label: 'Crankshaft balancer bolt M16x2x103', gmPart: '12557840', quantity: 1, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/12557840-balancer-bolt.glb', oemVerified: false },
+  { id: 'valley_cover_bolt', label: 'Valley cover bolt M8x1.25x30, 18 mm flange OD', gmPart: '11515758', quantity: 10, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/11515758-valley-cover-bolt.glb', oemVerified: false },
+  { id: 'water_pump_inlet_bolt', label: 'Water-pump inlet / thermostat housing bolt M6x1x25', gmPart: '11516480', quantity: 2, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/11516480-water-pump-inlet-bolt.glb', oemVerified: false },
+  { id: 'coolant_bleed_pipe_bolt', label: 'Coolant air-bleed pipe bolt M6x1x30', gmPart: '11514008', quantity: 4, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/11514008-coolant-bleed-bolt.glb', oemVerified: false },
+  { id: 'block_coolant_drain_plug', label: 'Block coolant drain plug M16x1.5x14, 24 mm flange OD', gmPart: '11588949', quantity: 2, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/11588949-block-drain-plug.glb', oemVerified: false },
+  { id: 'throttle_body_stud', label: 'Double-ended throttle-body stud M6x1, 46 mm total', gmPart: '89017691', quantity: 3, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/89017691-throttle-body-stud.glb', notes: 'Catalog segments: M6x1x26.5 + M6x1x10; total 46 mm.', oemVerified: false },
+  { id: 'exhaust_pipe_stud', label: 'Double-ended exhaust-manifold pipe stud M10x1.5, 57 mm total', gmPart: '11589264', quantity: 6, sourceTier: CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED, meshPath: '/cad/11589264-exhaust-pipe-stud.glb', notes: 'Catalog segments: M10x1.5x30 + M10x1.5x16; total 57 mm.', oemVerified: false },
+
+  // Known OE fastener identity but insufficient published length for exact CAD.
+  { id: 'valve_cover_bolt', label: 'Valve-cover bolt M6x1 with grommet/sleeve', gmPart: '12577215', quantity: 8, sourceTier: CAD_SOURCE_TIERS.PROCEDURAL_FALLBACK, meshPath: '/cad/12577215-valve-cover-bolt.glb', notes: 'Thread/pitch and quantity are catalog-grounded; exact under-head length not published in the source used, so no exact-length B-rep is claimed.', oemVerified: false }
 ]);
 
 export function cadCoverageSummary() {
   const total = CAD_ASSETS.reduce((sum, p) => sum + p.quantity, 0);
   const verified = CAD_ASSETS.filter(p => p.oemVerified).reduce((sum, p) => sum + p.quantity, 0);
   const catalogParts = CAD_ASSETS.length;
-  return { catalogParts, totalInstances: total, oemVerifiedInstances: verified, oemVerifiedPercent: total ? (verified / total) * 100 : 0 };
+  const dimensioned = CAD_ASSETS.filter(p => p.sourceTier === CAD_SOURCE_TIERS.DIMENSIONALLY_RECONSTRUCTED).reduce((sum, p) => sum + p.quantity, 0);
+  return {
+    catalogParts,
+    totalInstances: total,
+    dimensionallyReconstructedInstances: dimensioned,
+    oemVerifiedInstances: verified,
+    oemVerifiedPercent: total ? (verified / total) * 100 : 0
+  };
 }
