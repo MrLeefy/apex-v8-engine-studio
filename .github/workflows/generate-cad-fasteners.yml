@@ -1,0 +1,67 @@
+name: Generate GM-dimensioned CAD fasteners
+
+on:
+  push:
+    branches:
+      - agent/2006-tahoe-53-l59-rebuild
+    paths:
+      - tools/cad/generate_known_dimension_fasteners.py
+      - tools/cad/requirements.txt
+      - .github/workflows/generate-cad-fasteners.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-cad:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/2006-tahoe-53-l59-rebuild
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/cad/requirements.txt
+
+      - name: Install OpenCascade CAD tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tools/cad/requirements.txt
+
+      - name: Generate STEP B-reps and GLB tessellations
+        run: python tools/cad/generate_known_dimension_fasteners.py
+
+      - name: Show generated CAD artifacts
+        run: |
+          ls -lh public/cad/*.step public/cad/*.glb
+          python - <<'PY'
+          from pathlib import Path
+          files = sorted(list(Path('public/cad').glob('*.step')) + list(Path('public/cad').glob('*.glb')))
+          print(f'Generated {len(files)} CAD files, {sum(f.stat().st_size for f in files)/1024/1024:.2f} MiB total')
+          PY
+
+      - name: Commit generated CAD solids to branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/cad/*.step public/cad/*.glb
+          if git diff --cached --quiet; then
+            echo "CAD outputs are already up to date."
+            exit 0
+          fi
+          git commit -m "generate CadQuery STEP solids for GM-dimensioned fasteners"
+          # The modeling branch may advance while OpenCascade is generating the
+          # solids. Rebase this isolated generated-output commit onto the latest
+          # branch head before pushing rather than force-pushing or losing work.
+          git fetch origin agent/2006-tahoe-53-l59-rebuild
+          git rebase origin/agent/2006-tahoe-53-l59-rebuild
+          git push origin HEAD:agent/2006-tahoe-53-l59-rebuild

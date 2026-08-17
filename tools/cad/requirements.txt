@@ -1,0 +1,4 @@
+# Reproducible OpenCascade/CadQuery tooling for generated STEP/GLB parts.
+# Changes here intentionally retrigger CAD generation on the active Tahoe branch.
+cadquery==2.8.0
+trimesh>=4.8,<5

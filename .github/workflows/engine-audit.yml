@@ -1,0 +1,72 @@
+name: Tahoe 5.3 Browser Audit
+
+on:
+  push:
+    branches:
+      - agent/2006-tahoe-53-l59-rebuild
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit CAD provenance registry
+        run: npm run audit:cad
+
+      - name: Build Vite app
+        run: npm run build
+
+      - name: Start Vite dev server
+        run: |
+          npm run dev > /tmp/apex-v8-vite.log 2>&1 &
+          echo $! > /tmp/apex-v8-vite.pid
+
+      - name: Wait for dev server
+        run: |
+          for i in {1..40}; do
+            if curl -fsS http://127.0.0.1:5173/ >/dev/null; then
+              echo "Vite is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/apex-v8-vite.log
+          exit 1
+
+      - name: Run Puppeteer 3D browser audit
+        run: npm run audit:3d
+
+      - name: Upload 3D audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tahoe-53-3d-audit
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Vite log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vite-log
+          path: /tmp/apex-v8-vite.log
+          if-no-files-found: ignore
+          retention-days: 7
