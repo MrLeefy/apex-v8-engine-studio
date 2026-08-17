@@ -54,42 +54,71 @@ async function run3DInspection() {
     console.log('🔍 Querying live ThreeDebugBridge API...');
     const sceneAudit = await page.evaluate(() => {
       const bridge = window.__DEBUG_BRIDGE__;
-      if (!bridge) return { error: 'ThreeDebugBridge not attached' };
+      const engine = window.__ENGINE__;
+      if (!bridge || !engine) return { error: 'ThreeDebugBridge or EngineModel not attached' };
+
+      // Keep the CI smoke/visual audit responsive. The debug bridge's legacy
+      // check_mesh_collisions() is intentionally NOT called here because it does
+      // an O(n²) all-scene pairwise sweep and can stall on this much denser engine.
       return {
         state: bridge.capture_scene_state(),
         objects: bridge.list_scene_objects(),
         stats: bridge.get_renderer_stats(),
-        collisions: bridge.check_mesh_collisions(),
+        collisionAudit: {
+          mode: 'deferred',
+          reason: 'Run targeted subassembly collision checks separately; legacy global sweep is quadratic.'
+        },
         engine: {
-          name: window.__ENGINE__?.group?.name || null,
-          inspectableParts: window.__ENGINE__?.inspectableParts?.length || 0,
-          pistons: window.__ENGINE__?.pistons?.length || 0,
-          valves: window.__ENGINE__?.valves?.length || 0,
-          pushrods: window.__ENGINE__?.pushrods?.length || 0,
-          rockerArms: window.__ENGINE__?.rockerArms?.length || 0,
-          camshafts: window.__ENGINE__?.camshafts?.length || 0,
-          turbos: window.__ENGINE__?.turbos?.length || 0
+          name: engine.group?.name || null,
+          inspectableParts: engine.inspectableParts?.length || 0,
+          pistons: engine.pistons?.length || 0,
+          valves: engine.valves?.length || 0,
+          pushrods: engine.pushrods?.length || 0,
+          rockerArms: engine.rockerArms?.length || 0,
+          camshafts: engine.camshafts?.length || 0,
+          turbos: engine.turbos?.length || 0,
+          firingOrder: engine.specs?.firingOrder || null
         }
       };
     });
 
     if (sceneAudit.error) throw new Error(sceneAudit.error);
-    if (!sceneAudit.objects?.length) throw new Error('Scene contains no inspectable/rendered objects');
+    if (!sceneAudit.objects?.length) throw new Error('Scene contains no rendered objects');
     if (pageErrors.length) throw new Error(`Browser produced ${pageErrors.length} uncaught page error(s)`);
+
+    const expected = sceneAudit.engine;
+    const registryFailures = [];
+    if (expected.pistons !== 8) registryFailures.push(`expected 8 pistons, got ${expected.pistons}`);
+    if (expected.valves !== 16) registryFailures.push(`expected 16 valves, got ${expected.valves}`);
+    if (expected.pushrods !== 16) registryFailures.push(`expected 16 pushrods, got ${expected.pushrods}`);
+    if (expected.rockerArms !== 16) registryFailures.push(`expected 16 rocker arms, got ${expected.rockerArms}`);
+    if (expected.camshafts !== 1) registryFailures.push(`expected 1 camshaft, got ${expected.camshafts}`);
+    if (expected.turbos !== 0) registryFailures.push(`expected 0 turbos, got ${expected.turbos}`);
+    if (registryFailures.length) throw new Error(`Engine architecture registry failed: ${registryFailures.join('; ')}`);
 
     console.log(`📊 Scene Objects Count: ${sceneAudit.objects.length}`);
     console.log(`🎨 Draw Calls: ${sceneAudit.stats?.render?.calls ?? 0} | Triangles: ${sceneAudit.stats?.render?.triangles ?? 0}`);
-    console.log(`⚠️ Geometry Collision Candidates: ${sceneAudit.collisions?.collisionCount ?? 0}`);
-    console.log(`🔩 Engine registry: ${sceneAudit.engine.pistons} pistons • ${sceneAudit.engine.valves} valves • ${sceneAudit.engine.pushrods} pushrods • ${sceneAudit.engine.rockerArms} rockers • ${sceneAudit.engine.camshafts} camshaft(s) • ${sceneAudit.engine.turbos} turbos`);
+    console.log(`🔩 Engine registry: ${expected.pistons} pistons • ${expected.valves} valves • ${expected.pushrods} pushrods • ${expected.rockerArms} rockers • ${expected.camshafts} camshaft • ${expected.turbos} turbos`);
 
-    // Exercise the engine through a full four-stroke 720° cycle before screenshots.
+    // Exercise exactly 720 crank degrees using deterministic update steps.
     await page.evaluate(() => {
       const engine = window.__ENGINE__;
-      if (!engine) return;
-      engine.setRPM(1200);
-      for (let i = 0; i < 240; i++) engine.update((4 * Math.PI / 240) / ((1200 * 2 * Math.PI) / 60));
+      const rpm = 1200;
+      const radPerSec = (rpm * Math.PI * 2) / 60;
+      engine.setRPM(rpm);
+      const steps = 240;
+      const dt = (4 * Math.PI / steps) / radPerSec;
+      for (let i = 0; i < steps; i++) engine.update(dt);
       engine.setRPM(650);
     });
+
+    const motionState = await page.evaluate(() => ({
+      crankAngle: window.__ENGINE__?.crankAngle ?? null,
+      pistonCount: window.__ENGINE__?.pistons?.length ?? 0,
+      rpm: window.__ENGINE__?.rpm ?? null
+    }));
+    if (!Number.isFinite(motionState.crankAngle)) throw new Error('Crank motion produced a non-finite angle');
+    console.log(`⚙️ 720° motion exercise complete • crank angle ${motionState.crankAngle.toFixed(3)} rad • ${motionState.pistonCount} pistons active`);
 
     const studioShotPath = path.join(artifactsDir, 'studio_view.png');
     await page.screenshot({ path: studioShotPath, fullPage: true });
@@ -125,11 +154,8 @@ async function run3DInspection() {
 
     const report = {
       ...sceneAudit,
-      browser: {
-        consoleLogs,
-        pageErrors,
-        url: page.url()
-      }
+      motionState,
+      browser: { consoleLogs, pageErrors, url: page.url() }
     };
     const reportPath = path.join(artifactsDir, '3d_scene_report.json');
     fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
