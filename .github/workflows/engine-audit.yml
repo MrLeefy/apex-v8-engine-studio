@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit CAD provenance registry
+        run: npm run audit:cad
+
       - name: Build Vite app
         run: npm run build
 
