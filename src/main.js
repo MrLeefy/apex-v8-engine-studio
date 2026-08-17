@@ -4,12 +4,18 @@ import { SoundEngine } from './soundEngine.js';
 import { EngineModel } from './engineModel.js';
 import { UIController } from './uiController.js';
 import { ThreeDebugBridge } from './threeDebugBridge.js';
+import { CadAssetOverlay } from './cad/CadAssetOverlay.js';
 
 /**
  * 2006 Chevrolet Tahoe 5.3L Vortec 5300 interactive engine studio.
  * The scene is centered on the real Gen III pushrod engine model and supports
  * orbit inspection, exploded assembly, translucent cutaway and synchronized
  * crank/piston/valvetrain animation.
+ *
+ * CAD strategy:
+ * - EngineModel is the mechanically/dimensionally grounded procedural fallback.
+ * - CadAssetOverlay loads provenance-verified CAD-derived parts when available.
+ * - A third-party mesh can never silently replace the fallback as "OEM CAD".
  */
 class App {
   constructor() {
@@ -23,6 +29,7 @@ class App {
     this.engine = null;
     this.ui = null;
     this.debugBridge = null;
+    this.cadOverlay = null;
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
     this.hoveredMesh = null;
@@ -168,8 +175,16 @@ class App {
     this.sound = new SoundEngine();
     this.engine = new EngineModel();
     this.scene.add(this.engine.group);
+
+    // CAD-derived geometry is additive/replacement-by-proof. Missing assets do
+    // not break the studio, while verified CAD can replace procedural groups.
+    this.cadOverlay = new CadAssetOverlay(this);
+    this.cadOverlay.loadAvailable().catch(error => console.warn('[CAD] overlay load failed', error));
+
     this.ui = new UIController(this);
     this.debugBridge = new ThreeDebugBridge(this);
+
+    window.__CAD_REPORT__ = () => this.cadOverlay?.getReport();
   }
 
   initEventListeners() {
