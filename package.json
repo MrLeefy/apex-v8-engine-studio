@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "audit:3d": "node scripts/inspect-3d-scene.js",
-    "verify:engine": "node scripts/verify-engine.mjs"
+    "verify:engine": "node scripts/verify-engine.mjs",
+    "render:demo": "node scripts/render-demo.mjs"
   },
   "dependencies": {
     "three": "^0.160.0"

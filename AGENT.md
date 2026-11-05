@@ -24,6 +24,8 @@
 | `L` | Arm 2-step launch limiter (4,500 RPM) |
 | `N` (hold) | Nitrous (>3,000 RPM, >85 % throttle) |
 
+Run `npm run render:demo -- [tailpipe|bay|control] [outDir] [street|race]` to render a scripted 54 s session (same physics + worklet code as the browser) to WAV.
+
 Run `npm run verify:engine` for headless realism checks (physics calibration + rendered-audio order analysis: firing order 4 dominant at every RPM, cross-plane half-order burble, turbo whistle, limiter stutter, BOV).
 
 Performance: `EngineModel.optimizeScene()` rebuilds over-tessellated primitives and merges static meshes per rigid body/material -> ~236 draw calls, ~32.5k triangles.
