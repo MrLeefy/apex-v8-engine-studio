@@ -67,8 +67,14 @@ export class SoundEngine {
 
       if (!ctx.audioWorklet) throw new Error('AudioWorklet not supported');
       const url = URL.createObjectURL(new Blob([ENGINE_WORKLET_SOURCE], { type: 'application/javascript' }));
-      await ctx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
+      try {
+        await ctx.audioWorklet.addModule(url);
+      } catch (blobErr) {
+        // sandboxed hosts may refuse blob: modules; fall back to the published file
+        await ctx.audioWorklet.addModule(new URL('engine-worklet.js', document.baseURI).href);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
 
       this.node = new AudioWorkletNode(ctx, 'apex-v8-engine', {
         numberOfInputs: 0,
