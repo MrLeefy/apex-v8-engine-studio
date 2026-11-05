@@ -182,7 +182,8 @@
   </aside>
 
   <!-- Right Floating HUD: Component Inspector & Dyno Bench -->
-  <aside class="hud-panel hud-right">
+  <aside class="hud-panel hud-right" id="hud-right">
+    <button class="sheet-handle" id="sheet-handle" aria-label="Resize control panel"><span></span></button>
     <!-- Real-Time Component Inspector Card -->
     <div class="hud-card glass-panel" id="component-inspector-card">
       <div class="card-header">
@@ -223,6 +224,9 @@
         <button class="btn-start" id="btn-start"><span class="start-dot"></span><span id="btn-start-label">START ENGINE</span></button>
         <kbd>S</kbd>
       </div>
+      <button class="btn-rev" id="btn-rev" aria-label="Hold to rev: wide-open throttle while pressed">
+        <span class="rev-label">HOLD TO REV</span><span class="rev-sub">WIDE-OPEN THROTTLE • SPACE</span>
+      </button>
 
       <div class="dyno-stats-grid tri">
         <div class="d-stat"><span class="d-label">POWER</span><span class="d-val" id="dyno-hp">0 HP</span></div>

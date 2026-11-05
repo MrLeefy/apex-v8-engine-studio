@@ -1016,7 +1016,142 @@ kbd {
 .lg.tq { background: #00d2ff; }
 .lg.bst { background: #ffb703; }
 
-@media (max-width: 900px) {
+
+/* Hold-to-rev pedal */
+.btn-rev {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 159, 28, 0.55);
+  background: linear-gradient(180deg, rgba(255, 159, 28, 0.22), rgba(255, 159, 28, 0.06));
+  color: #fff3e0;
+  font-family: var(--font-tech);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.08s, transform 0.08s;
+}
+.btn-rev .rev-label { font-size: 15px; font-weight: 700; letter-spacing: 0.14em; }
+.btn-rev .rev-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); letter-spacing: 0.08em; }
+.btn-rev.pressed {
+  background: linear-gradient(180deg, rgba(255, 159, 28, 0.6), rgba(217, 4, 41, 0.35));
+  transform: scale(0.985);
+}
+.btn-rev:focus-visible, .btn-start:focus-visible, .btn-action:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 2px; }
+
+.sheet-handle { display: none; }
+
+/* ==========================================================================
+   Phone layout: compact header, engine on top, controls in a bottom sheet
+   ========================================================================== */
+@media (max-width: 760px) {
+  html, body { font-size: 12px; }
+
+  .app-header {
+    top: max(8px, env(safe-area-inset-top, 0px));
+    left: max(8px, env(safe-area-inset-left, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    height: auto;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+  }
+  .brand-badge { padding: 5px 10px 5px 6px; gap: 8px; min-width: 0; }
+  .brand-logo { width: 24px; height: 24px; font-size: 13px; }
+  .brand-title { font-size: 12px; white-space: nowrap; letter-spacing: 0.04em; }
+  .brand-subtitle { display: none; }
+  .header-status-pill { padding: 4px 6px; gap: 6px; }
+  .header-status-pill .status-text, .header-status-pill .status-indicator { display: none; }
+  .mode-tabs { grid-column: 1 / -1; order: 3; }
+  .mode-tab { flex: 1; justify-content: center; padding: 7px 4px; font-size: 10px; gap: 4px; }
+  .mode-tab .tab-icon, .mode-tab .tab-dot { display: none; }
+
+  .viewport-control-bar {
+    top: calc(max(8px, env(safe-area-inset-top, 0px)) + 88px);
+    left: max(8px, env(safe-area-inset-left, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    transform: none;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: var(--radius-md);
+  }
+  .viewport-control-bar .vp-label, .viewport-control-bar .vp-divider, #btn-wireframe-toggle { display: none; }
+  .viewport-control-bar .vp-item:first-child { flex: 1; min-width: 0; }
+  .viewport-control-bar .custom-select { width: 100%; }
+  .exploded-slider-wrap { min-width: 0; flex: 1; }
+
   .hud-left { display: none; }
-  .hud-right { width: calc(100% - 32px); }
+
+  .hud-right {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: var(--sheet-h, 52%);
+    padding: 0 max(8px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+    gap: 8px;
+    background: rgba(8, 10, 16, 0.94);
+    border-top: 1px solid var(--panel-border-bright);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.6);
+    pointer-events: auto;
+    overscroll-behavior: contain;
+    transition: height 0.25s ease;
+    z-index: 20;
+  }
+  .hud-right > .hud-card { border-radius: var(--radius-md); padding: 10px 10px; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  #dyno-hud-card { order: 1; }
+  #dyno-chart-card { order: 2; }
+  #component-inspector-card { order: 3; }
+
+  .sheet-handle {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    order: 0;
+    justify-content: center;
+    align-items: center;
+    height: 26px;
+    margin: 0 -8px;
+    border: 0;
+    background: rgba(8, 10, 16, 0.96);
+    cursor: pointer;
+  }
+  .sheet-handle span { width: 44px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.35); }
+
+  .dyno-hud { gap: 8px; }
+  .dyno-hud .card-header { margin-bottom: 0; }
+  .rpm-number { font-size: 28px; }
+  .dyno-meter { padding: 8px; }
+  .ignition-row kbd, .dyno-buttons kbd, .throttle-label .hint { display: none; }
+  .btn-start { padding: 12px; }
+  .btn-rev { padding: 16px 10px; }
+  .btn-rev .rev-sub { display: none; }
+  .dyno-buttons .btn-action { padding: 11px 6px; font-size: 11px; }
+  .custom-select { font-size: 13px; padding: 7px 8px; }
+  .custom-range { height: 22px; }
+  .dyno-stats-grid.tri .d-val { font-size: 12px; }
+  .fs-led i { width: 16px; height: 16px; }
+  .option-grid label { font-size: 10px; }
+
+  .hud-toast {
+    bottom: auto;
+    top: calc(max(8px, env(safe-area-inset-top, 0px)) + 132px);
+    max-width: calc(100% - 24px);
+    border-radius: var(--radius-md);
+  }
+  .toast-message { white-space: normal; }
+  .hover-tooltip { display: none !important; }
+}
+
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .hud-right { transition: none; }
 }

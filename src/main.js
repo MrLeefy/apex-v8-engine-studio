@@ -34,6 +34,8 @@ class App {
     this.physics = null;
     this.ui = null;
     this.timeScale = 1;
+    this.bottomInset = 0;
+    this.isPhone = window.matchMedia('(max-width: 760px), (pointer: coarse)').matches;
     this.fps = 60;
     this._fpsFrames = 0;
     this._fpsTime = 0;
@@ -63,6 +65,7 @@ class App {
     this.initLightingAndStudio();
     this.initSubsystems();
     this.initEventListeners();
+    this.updateCameraFrame();
     this.animate();
   }
 
@@ -81,7 +84,7 @@ class App {
       alpha: false
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.isPhone ? 1.5 : 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -158,8 +161,9 @@ class App {
     this.keyLight = new THREE.DirectionalLight(0xfff5e6, 2.8);
     this.keyLight.position.set(6, 12, 5);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.width = 4096;
-    this.keyLight.shadow.mapSize.height = 4096;
+    const shadowRes = this.isPhone ? 2048 : 4096;
+    this.keyLight.shadow.mapSize.width = shadowRes;
+    this.keyLight.shadow.mapSize.height = shadowRes;
     this.keyLight.shadow.camera.near = 0.5;
     this.keyLight.shadow.camera.far = 30.0;
     const d = 8;
@@ -263,10 +267,32 @@ class App {
   }
 
   onResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
+    const w = window.innerWidth, h = window.innerHeight;
+    this.renderer.setSize(w, h);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.isPhone ? 1.5 : 2));
+    this.updateCameraFrame();
+  }
+
+  /** Height (px) covered by the phone bottom sheet; the engine is framed above it. */
+  setBottomInset(px) {
+    this.bottomInset = px;
+    this.updateCameraFrame();
+  }
+
+  updateCameraFrame() {
+    const w = window.innerWidth, h = window.innerHeight;
+    const visibleH = Math.max(120, h - this.bottomInset);
+    const aspect = w / visibleH;
+    this.camera.aspect = w / h;
+    // Keep the engine's full width in the visible area: hold a ~58° horizontal view on
+    // narrow screens (38° vertical on desktop), then scale to the full frame because the
+    // sheet covers the lower part of it.
+    const tVis = Math.max(Math.tan(THREE.MathUtils.degToRad(19)), Math.tan(THREE.MathUtils.degToRad(29)) / aspect);
+    const tFull = tVis * h / visibleH;
+    this.camera.fov = Math.min(100, THREE.MathUtils.radToDeg(2 * Math.atan(tFull)));
+    if (this.bottomInset > 0) this.camera.setViewOffset(w, h, 0, this.bottomInset / 2, w, h);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   }
 
   onMouseMove(e) {

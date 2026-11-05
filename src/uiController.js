@@ -17,9 +17,11 @@ export class UIController {
     this.lastState = null;
     this.prevSweepData = null;
 
+    this.pedalHeld = false;
     this.cacheDOM();
     this.buildFiringLeds();
     this.bindEvents();
+    this.initMobileLayout();
     this.bindEngineEvents();
     this.initDefaultInspector();
     this.drawDynoChart();
@@ -187,6 +189,24 @@ export class UIController {
     // ---- engine controls
     this.btnStart?.addEventListener('click', () => this.toggleIgnition());
 
+    // hold-to-rev pedal (touch + mouse)
+    const rev = this.$('btn-rev');
+    if (rev) {
+      const down = (e) => {
+        e.preventDefault();
+        sound().init();
+        try { rev.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        this.pedalHeld = true; rev.classList.add('pressed'); this.updateKeyThrottle();
+        if (!physics().isRunning && physics().state === 'off') this.showToast('Start the engine first');
+      };
+      const up = () => { this.pedalHeld = false; rev.classList.remove('pressed'); this.updateKeyThrottle(); };
+      rev.addEventListener('pointerdown', down);
+      rev.addEventListener('pointerup', up);
+      rev.addEventListener('pointercancel', up);
+      rev.addEventListener('lostpointercapture', up);
+      rev.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
     this.throttleSlider?.addEventListener('input', (e) => {
       physics().handThrottle = parseInt(e.target.value, 10) / 100;
     });
@@ -258,11 +278,50 @@ export class UIController {
     window.addEventListener('blur', () => { this.keys.clear(); this.updateKeyThrottle(); this.setNitrous(false); });
   }
 
+  // ------------------------------------------------------------------ phone layout
+  initMobileLayout() {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const sheet = this.$('hud-right');
+    const chart = this.$('dyno-chart-card');
+    const leftPanel = document.querySelector('.hud-left');
+    const chartHome = chart ? chart.nextElementSibling : null;
+    const sizes = ['peek', 'half', 'full'];
+    this.sheetSize = 'half';
+    const sheetHeight = () => {
+      const h = window.innerHeight;
+      if (this.sheetSize === 'peek') return Math.min(345, h * 0.45);
+      if (this.sheetSize === 'full') return h * 0.86;
+      return h * 0.5;
+    };
+    const apply = () => {
+      if (!sheet) return;
+      if (mq.matches) {
+        if (chart && chart.parentElement !== sheet) sheet.appendChild(chart);
+        const h = sheetHeight();
+        sheet.style.setProperty('--sheet-h', `${Math.round(h)}px`);
+        // keep the engine centred in the visible area above the sheet (full height = overlay)
+        this.app.setBottomInset(this.sheetSize === 'full' ? 0 : h);
+      } else {
+        if (chart && leftPanel && chart.parentElement !== leftPanel) leftPanel.insertBefore(chart, chartHome);
+        sheet.style.removeProperty('--sheet-h');
+        this.app.setBottomInset(0);
+      }
+    };
+    this.$('sheet-handle')?.addEventListener('click', () => {
+      this.sheetSize = sizes[(sizes.indexOf(this.sheetSize) + 1) % sizes.length];
+      if (this.sheetSize !== 'full') sheet.scrollTop = 0;
+      apply();
+    });
+    mq.addEventListener ? mq.addEventListener('change', apply) : mq.addListener(apply);
+    window.addEventListener('resize', apply);
+    apply();
+  }
+
   updateKeyThrottle() {
     const k = this.keys;
     let v = 0;
     if (k.has('KeyE')) v = 0.35;
-    if (k.has('Space') || k.has('ArrowUp') || k.has('KeyW')) v = 1;
+    if (k.has('Space') || k.has('ArrowUp') || k.has('KeyW') || this.pedalHeld) v = 1;
     this.app.physics.keyThrottle = v;
   }
 
