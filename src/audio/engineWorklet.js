@@ -288,7 +288,7 @@ export function engineWorkletMain() {
         this.mufflerLp[b].setCutoff(mfc, sr);
         this.mufflerLpB[b].setCutoff(mfc * 1.8, sr);
         this.mufflerLp2[b].setCutoff(2200 + 5000 * rpmN, sr);
-        this.body[b].set(78 + 18 * b + 30 * rpmN, 1.6, sr);
+        this.body[b].set(78 + 18 * b + 30 * rpmN, 1.1, sr);
         this.spoolBp[b].set(1100 + 2600 * this.turbo, 0.9, sr);
       }
       this.intakeBp.set(220 + 700 * this.thr + 900 * rpmN, 1.4, sr);
@@ -394,8 +394,8 @@ export function engineWorkletMain() {
         e1 = this.muffler[1].process(e1 + post1 * 0.6 + wgn);
         e0 = this.mufflerLpB[0].process(this.mufflerLp[0].process(e0));
         e1 = this.mufflerLpB[1].process(this.mufflerLp[1].process(e1));
-        e0 += this.body[0].process(e0) * 0.9 + this.mufflerLp2[0].process(post0) * 0.55;
-        e1 += this.body[1].process(e1) * 0.9 + this.mufflerLp2[1].process(post1) * 0.55;
+        e0 += this.body[0].process(e0) * 0.3 + this.mufflerLp2[0].process(post0) * 0.55;
+        e1 += this.body[1].process(e1) * 0.3 + this.mufflerLp2[1].process(post1) * 0.55;
 
         // ---- intake & turbo
         const nz = this.noise();

@@ -24,6 +24,10 @@
 | `L` | Arm 2-step launch limiter (4,500 RPM) |
 | `N` (hold) | Nitrous (>3,000 RPM, >85 % throttle) |
 
+Run `npm run verify:engine` for headless realism checks (physics calibration + rendered-audio order analysis: firing order 4 dominant at every RPM, cross-plane half-order burble, turbo whistle, limiter stutter, BOV).
+
+Performance: `EngineModel.optimizeScene()` rebuilds over-tessellated primitives and merges static meshes per rigid body/material -> ~236 draw calls, ~32.5k triangles.
+
 Calibration (street cam, warm): idle ~820 RPM, full 2.5 bar boost by ~3,500 RPM with ~1.1 s turbo lag under load, idle -> 7,000 RPM free-rev in ~0.9 s, dyno pull ~1,100 HP / ~870 lb-ft.
 
 ---

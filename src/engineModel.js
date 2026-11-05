@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TextureGenerator } from './textures.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   FIRING_DEG, CAM_PROFILES, cylinderTheta, pistonTravel, valveLift, cycleDegFromCrank, wrap
 } from './engineTiming.js';
@@ -70,6 +71,123 @@ export class EngineModel {
 
     this.buildEngine();
     this.buildFlameFX();
+    this.optimizeScene();
+  }
+
+  /**
+   * Performance pass (keeps the look, meets the 300 draw-call / 35k triangle budget):
+   *  1. Rebuild over-tessellated primitives from their stored parameters.
+   *  2. Merge static meshes that share a material inside each rigid body
+   *     (subassembly, crankshaft, piston crown, con-rod, camshaft, valve, pulley),
+   *     so every moving part still moves independently.
+   */
+  optimizeScene() {
+    const cache = new Map();
+    const lim = (v, m) => Math.min(v ?? m, m);
+    const reduce = (g) => {
+      if (cache.has(g)) return cache.get(g);
+      const p = g.parameters || {};
+      let n = null;
+      switch (g.type) {
+        case 'CylinderGeometry': {
+          const small = Math.max(p.radiusTop, p.radiusBottom) < 0.07;
+          n = new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height,
+            lim(p.radialSegments, small ? 6 : 14), 1, p.openEnded, p.thetaStart, p.thetaLength);
+          break;
+        }
+        case 'TubeGeometry':
+          n = new THREE.TubeGeometry(p.path, lim(p.tubularSegments, p.radius < 0.05 ? 10 : 16),
+            p.radius, lim(p.radialSegments, p.radius < 0.05 ? 5 : 8), p.closed);
+          break;
+        case 'TorusGeometry':
+          n = new THREE.TorusGeometry(p.radius, p.tube, lim(p.radialSegments, 6), lim(p.tubularSegments, 28), p.arc);
+          break;
+        case 'SphereGeometry':
+          n = new THREE.SphereGeometry(p.radius, lim(p.widthSegments, 10), lim(p.heightSegments, 7),
+            p.phiStart, p.phiLength, p.thetaStart, p.thetaLength);
+          break;
+        case 'ConeGeometry':
+          n = new THREE.ConeGeometry(p.radius, p.height, lim(p.radialSegments, 12), 1, p.openEnded);
+          break;
+        case 'LatheGeometry':
+          n = new THREE.LatheGeometry(p.points, lim(p.segments, 16), p.phiStart, p.phiLength);
+          break;
+        case 'ExtrudeGeometry': {
+          const o = p.options || {};
+          if (g === this._lobeGeom) break;
+          n = new THREE.ExtrudeGeometry(p.shapes, {
+            ...o, curveSegments: lim(o.curveSegments, 5), bevelSegments: lim(o.bevelSegments, 1)
+          });
+          break;
+        }
+      }
+      const out = n || g;
+      cache.set(g, out);
+      return out;
+    };
+    this.group.traverse((o) => {
+      if (o.isMesh && o.geometry) {
+        const ng = reduce(o.geometry);
+        if (ng !== o.geometry) o.geometry = ng;
+      }
+    });
+    if (this.timingBelt) this.timingBelt.geometry = reduce(this.timingBelt.geometry);
+
+    // ---- rigid bodies
+    const roots = new Set(this.group.children);
+    roots.add(this.crankshaft);
+    this.pistons.forEach((p) => { roots.add(p.crown); roots.add(p.conRod); });
+    this.camshafts.forEach((c) => roots.add(c));
+    this.valveMeta.forEach((v) => roots.add(v.group));
+    this.pulleys.forEach((p) => roots.add(p));
+    const keep = new Set();
+    this.turbos.forEach((t) => keep.add(t.wheel));
+    this.combustionFlashes.forEach((f) => keep.add(f));
+    this.camLobes.forEach((l) => keep.add(l.mesh));     // re-oriented on cam change
+    this.inspectableParts.forEach((m) => keep.add(m));
+
+    this.group.updateMatrixWorld(true);
+    const buckets = new Map();
+    this.group.traverse((o) => {
+      if (!o.isMesh || roots.has(o) || keep.has(o) || o.name || (o.userData && o.userData.name)) return;
+      if (Array.isArray(o.material)) return;
+      let root = o.parent;
+      while (root && !roots.has(root)) root = root.parent;
+      if (!root) return;
+      const key = `${root.id}|${o.material.uuid}|${o.castShadow ? 1 : 0}|${o.receiveShadow ? 1 : 0}`;
+      if (!buckets.has(key)) buckets.set(key, { root, mat: o.material, cast: o.castShadow, recv: o.receiveShadow, list: [] });
+      buckets.get(key).list.push(o);
+    });
+
+    const inv = new THREE.Matrix4();
+    const rel = new THREE.Matrix4();
+    buckets.forEach((b) => {
+      if (b.list.length < 2) return;
+      inv.copy(b.root.matrixWorld).invert();
+      const geoms = b.list.map((m) => {
+        rel.multiplyMatrices(inv, m.matrixWorld);
+        let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+        Object.keys(g.attributes).forEach((k) => { if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k); });
+        if (!g.attributes.uv) {
+          g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+        }
+        g.clearGroups();
+        g.applyMatrix4(rel);
+        return g;
+      });
+      const merged = mergeGeometries(geoms, false);
+      geoms.forEach((g) => g.dispose());
+      if (!merged) return;
+      const mesh = new THREE.Mesh(merged, b.mat);
+      mesh.castShadow = b.cast;
+      mesh.receiveShadow = b.recv;
+      b.list.forEach((m) => {
+        // re-parent any children (none expected for leaf parts) before removal
+        m.children.slice().forEach((c) => { if (c.isObject3D) b.root.attach(c); });
+        m.parent.remove(m);
+      });
+      b.root.add(mesh);
+    });
   }
 
   initMaterials() {
@@ -1104,7 +1222,7 @@ export class EngineModel {
   getCamLobeGeometry() {
     if (this._lobeGeom) return this._lobeGeom;
     const shape = new THREE.Shape();
-    const N = 48;
+    const N = 24;
     for (let k = 0; k <= N; k++) {
       const a = (k / N) * Math.PI * 2;
       const c = Math.cos(a);
