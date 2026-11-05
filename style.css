@@ -353,6 +353,7 @@ html, body {
 
 .hud-panel > * {
   pointer-events: auto;
+  flex-shrink: 0;
 }
 
 .hud-left {
@@ -734,4 +735,287 @@ html, body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-main);
+}
+
+/* ==========================================================================
+   Engine control & live ECU telemetry
+   ========================================================================== */
+.hud-panel {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.dyno-bar-wrap {
+  position: relative;
+}
+
+.dyno-bar-wrap::after {
+  /* redline at 8,500 of a 9,000 RPM scale */
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 94.4%;
+  right: 0;
+  background: repeating-linear-gradient(45deg, rgba(217, 4, 41, 0.55) 0 3px, rgba(217, 4, 41, 0.2) 3px 6px);
+}
+
+.dyno-bar-fill {
+  transition: none;
+}
+
+.mini-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mini-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.mb-track {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.mb-fill {
+  height: 100%;
+  width: 0%;
+}
+
+.mb-fill.thr { background: var(--accent-green); }
+.mb-fill.map { background: linear-gradient(90deg, #4cc9f0, #ff9f1c 40%, #d90429); }
+
+.mb-atm {
+  /* 1.0 bar absolute on a 0-3.6 bar scale */
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 27.8%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.ignition-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-start {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(0, 245, 155, 0.55);
+  background: radial-gradient(circle at 30% 30%, rgba(0, 245, 155, 0.28), rgba(0, 245, 155, 0.08));
+  color: #eafff6;
+  font-family: var(--font-tech);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-start:hover { background: rgba(0, 245, 155, 0.3); }
+
+.btn-start.running {
+  border-color: rgba(217, 4, 41, 0.7);
+  background: radial-gradient(circle at 30% 30%, rgba(217, 4, 41, 0.35), rgba(217, 4, 41, 0.1));
+  color: #ffe5ea;
+}
+
+.btn-start.busy {
+  border-color: rgba(255, 183, 3, 0.7);
+  background: rgba(255, 183, 3, 0.18);
+}
+
+.start-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 10px var(--accent-green);
+}
+
+.btn-start.running .start-dot { background: #ff4d6d; box-shadow: 0 0 10px #ff4d6d; }
+.btn-start.busy .start-dot { background: #ffb703; box-shadow: 0 0 10px #ffb703; animation: blink 0.25s infinite alternate; }
+
+@keyframes blink { to { opacity: 0.25; } }
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dyno-stats-grid.tri {
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5px;
+}
+
+.dyno-stats-grid.tri .d-stat { padding: 5px 6px; }
+.dyno-stats-grid.tri .d-val { font-size: 11px; white-space: nowrap; }
+.d-val.warn { color: #ffb703; }
+.d-val.hot { color: #ff4d6d; }
+.d-val.good { color: var(--accent-green); }
+
+.firing-strip {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px 8px;
+}
+
+.fs-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.fs-leds {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.fs-led {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.fs-led i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fs-led.bank-r b { color: #7fd8ff; }
+.fs-led.bank-l b { color: #ffc6a0; }
+.fs-led b { font-weight: 700; }
+
+.throttle-label .hint {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+#throttle-val { color: var(--accent-green); }
+
+.dyno-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.dyno-buttons .btn-action {
+  padding: 7px 6px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-action.on {
+  background: rgba(255, 183, 3, 0.3);
+  border-color: rgba(255, 183, 3, 0.8);
+  box-shadow: 0 0 12px rgba(255, 183, 3, 0.35);
+}
+
+.btn-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+}
+
+.option-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.option-grid label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  grid-column: span 2;
+  cursor: pointer;
+}
+
+.option-grid .custom-select { width: 100%; }
+.option-grid .custom-range { margin-top: 6px; }
+
+#dyno-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.chart-legend {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.chart-legend .lg {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.lg.hp { background: #ff4d6d; }
+.lg.tq { background: #00d2ff; }
+.lg.bst { background: #ffb703; }
+
+@media (max-width: 900px) {
+  .hud-left { display: none; }
+  .hud-right { width: calc(100% - 32px); }
 }

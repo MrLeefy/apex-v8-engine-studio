@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { TextureGenerator } from './textures.js';
+import {
+  FIRING_DEG, CAM_PROFILES, cylinderTheta, pistonTravel, valveLift, cycleDegFromCrank, wrap
+} from './engineTiming.js';
 
 /**
  * Ultra-Realistic CAD Procedural Apex-V8 5.0L Twin-Turbo Racing Engine Model.
@@ -31,6 +34,11 @@ export class EngineModel {
     this.timingBelt = null;
     this.exhaustHeaders = [];
     this.flameParticles = null;
+    this.valveMeta = [];          // { group, cyl, exhaust }
+    this.camLobes = [];           // { mesh, cyl, exhaust, baseRot }
+    this.combustionFlashes = [];  // per cylinder index
+    this.turboOutlets = [];       // Object3D markers at dump-pipe exits
+    this.camProfile = CAM_PROFILES.street;
 
     // Subassemblies for Exploded View
     this.subassemblies = {
@@ -441,8 +449,22 @@ export class EngineModel {
     assemblyGroup.add(conRodGroup);
     this.group.add(assemblyGroup);
 
+    // Combustion flame-front glow inside the chamber (visible in X-Ray)
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3, 16, 12),
+      new THREE.MeshBasicMaterial({
+        color: 0xff7a1a, transparent: true, opacity: 0, depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    flash.scale.set(1.25, 0.45, 1.25);
+    flash.position.y = 2.12;
+    flash.visible = false;
+    assemblyGroup.add(flash);
+    this.combustionFlashes[index] = flash;
+
     this.pistons.push({
-      group: assemblyGroup, crown: crown, conRod: conRodGroup,
+      index, group: assemblyGroup, crown: crown, conRod: conRodGroup,
       bank: bank, bankAngle: bankAngle, phase: phase,
       zPos: zPos, rodLength: rodLength, crankRadius: 0.35
     });
@@ -527,12 +549,14 @@ export class EngineModel {
       camShaft.rotation.x = Math.PI / 2;
       camGroup.add(camShaft);
 
+      const isExhaustCam = bank === 'L' ? cx < 0 : cx > 0;   // exhaust cam sits outboard
       for (let v = 0; v < 8; v++) {
-        const lobe = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.1, 0.1, 16), this.matForged);
-        lobe.rotation.x = Math.PI / 2;
-        lobe.rotation.z = (v * Math.PI) / 4;
+        const cyl = (bank === 'L' ? 0 : 4) + Math.floor(v / 2);
+        const lobe = new THREE.Mesh(this.getCamLobeGeometry(), this.matForged);
         lobe.position.set(0, 0, -1.6 + v * 0.46);
+        lobe.rotation.z = this.lobeAngle(cyl, isExhaustCam);
         camGroup.add(lobe);
+        this.camLobes.push({ mesh: lobe, cyl, exhaust: isExhaustCam });
       }
 
       headGroup.add(camGroup);
@@ -544,6 +568,9 @@ export class EngineModel {
       const zPos = -1.6 + v * 0.46;
       [-0.32, 0.32].forEach(vx => {
         const valveGroup = new THREE.Group();
+        const cyl = (bank === 'L' ? 0 : 4) + Math.floor(v / 2);
+        const exhaust = bank === 'L' ? vx < 0 : vx > 0;
+        this.valveMeta.push({ group: valveGroup, cyl, exhaust });
         valveGroup.position.set(vx, 0.3, zPos);
 
         const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.45, 16), this.matLiner);
@@ -803,6 +830,22 @@ export class EngineModel {
     wgRod.position.set(0, 0.28, 0.15);
     turboGroup.add(wgRod);
 
+    // Dyno-cell dump pipe from the turbine outlet back to the extraction duct
+    const side = isLeft ? 1 : -1;
+    const dumpCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -0.3, 0.3),
+      new THREE.Vector3(side * 0.04, -0.62, 0.9),
+      new THREE.Vector3(side * 0.1, -0.8, 1.7),
+      new THREE.Vector3(side * 0.14, -0.86, 2.45)
+    ]);
+    const dump = new THREE.Mesh(new THREE.TubeGeometry(dumpCurve, 24, 0.12, 12), this.matHeader);
+    dump.castShadow = true;
+    turboGroup.add(dump);
+    const outlet = new THREE.Object3D();
+    outlet.position.set(side * 0.14, -0.86, 2.5);
+    turboGroup.add(outlet);
+    this.turboOutlets.push(outlet);
+
     this.turbos.push({ group: turboGroup, wheel: wheel, isLeft: isLeft });
     return { exhaust: exhaustGroup, turbo: turboGroup };
   }
@@ -902,6 +945,7 @@ export class EngineModel {
     pulleyGroup.add(bolt);
 
     pulleyGroup.position.set(posX, posY, posZ);
+    pulleyGroup.userData.ratio = 0.52 / radius;   // belt-driven speed relative to crank damper
     this.pulleys.push(pulleyGroup);
 
     return pulleyGroup;
@@ -1056,40 +1100,136 @@ export class EngineModel {
     this.group.add(plumbingGroup);
   }
 
-  buildFlameFX() {
-    const count = 40;
-    const geom = new THREE.BufferGeometry();
-    const pos = new Float32Array(count * 3);
-    const cols = new Float32Array(count * 3);
-
-    for (let i = 0; i < count; i++) {
-      pos[i * 3 + 0] = (Math.random() - 0.5) * 3.5;
-      pos[i * 3 + 1] = 0.4;
-      pos[i * 3 + 2] = 2.4 + Math.random() * 1.2;
-
-      cols[i * 3 + 0] = 0.2 + Math.random() * 0.8;
-      cols[i * 3 + 1] = 0.4 + Math.random() * 0.4;
-      cols[i * 3 + 2] = 1.0;
+  // --- Cam lobe: base circle + ramp + nose (nose along +X in lobe space) ---
+  getCamLobeGeometry() {
+    if (this._lobeGeom) return this._lobeGeom;
+    const shape = new THREE.Shape();
+    const N = 48;
+    for (let k = 0; k <= N; k++) {
+      const a = (k / N) * Math.PI * 2;
+      const c = Math.cos(a);
+      const r = 0.1 + 0.065 * Math.pow(Math.max(0, c), 2.6);
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r;
+      if (k === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
     }
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.1, bevelEnabled: false, curveSegments: 4 });
+    g.translate(0, 0, -0.05);
+    this._lobeGeom = g;
+    return g;
+  }
 
-    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geom.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  /** Lobe orientation on the cam so its nose points at the follower at peak lift. */
+  lobeAngle(cyl, exhaust) {
+    const p = this.camProfile;
+    const open = exhaust ? p.evo : p.ivo;
+    const close = exhaust ? p.evc : p.ivc;
+    const peakRel = open + wrap(close - open, 720) / 2;
+    const peakCycleRad = THREE.MathUtils.degToRad(FIRING_DEG[cyl] + peakRel);
+    return -Math.PI / 2 - peakCycleRad / 2;
+  }
+
+  setCamProfile(name) {
+    this.camProfile = CAM_PROFILES[name] || CAM_PROFILES.street;
+    this.camLobes.forEach((l) => { l.mesh.rotation.z = this.lobeAngle(l.cyl, l.exhaust); });
+  }
+
+  // --- Exhaust afterfire flame particles (spawned on real pop events) ---
+  buildFlameFX() {
+    const count = 220;
+    const geom = new THREE.BufferGeometry();
+    this.flamePos = new Float32Array(count * 3);
+    this.flameCol = new Float32Array(count * 3);
+    this.flameVel = new Float32Array(count * 3);
+    this.flameLife = new Float32Array(count);
+    this.flameAge = new Float32Array(count).fill(1e9);
+    this.flameHeat = new Float32Array(count);
+    this.flameNext = 0;
+    for (let i = 0; i < count; i++) this.flamePos[i * 3 + 1] = -100;
+
+    geom.setAttribute('position', new THREE.BufferAttribute(this.flamePos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(this.flameCol, 3));
+
+    // soft round flame sprite
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const cg = cv.getContext('2d');
+    const grad = cg.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    cg.fillStyle = grad;
+    cg.fillRect(0, 0, 64, 64);
+    const sprite = new THREE.CanvasTexture(cv);
 
     const mat = new THREE.PointsMaterial({
-      size: 0.22,
+      size: 0.34,
+      map: sprite,
       vertexColors: true,
       transparent: true,
-      opacity: 0,
+      opacity: 1,
+      depthWrite: false,
       blending: THREE.AdditiveBlending
     });
 
     this.flameParticles = new THREE.Points(geom, mat);
+    this.flameParticles.frustumCulled = false;
     this.group.add(this.flameParticles);
+    this._tmpV = new THREE.Vector3();
   }
 
+  /** Afterfire out of a bank's dump pipe. bank 0 = left, 1 = right. */
+  spawnFlame(bank, intensity = 1) {
+    const outlet = this.turboOutlets[bank];
+    if (!outlet || !this.flamePos) return;
+    outlet.updateWorldMatrix(true, false);
+    const p = this._tmpV.setFromMatrixPosition(outlet.matrixWorld);
+    this.group.worldToLocal(p);
+    const n = Math.round(8 + 22 * intensity);
+    const count = this.flameLife.length;
+    for (let k = 0; k < n; k++) {
+      const i = this.flameNext; this.flameNext = (this.flameNext + 1) % count;
+      this.flamePos[i * 3] = p.x + (Math.random() - 0.5) * 0.08;
+      this.flamePos[i * 3 + 1] = p.y + (Math.random() - 0.5) * 0.08;
+      this.flamePos[i * 3 + 2] = p.z;
+      const speed = 3.5 + Math.random() * 5 * intensity;
+      this.flameVel[i * 3] = (Math.random() - 0.5) * 1.1;
+      this.flameVel[i * 3 + 1] = (Math.random() - 0.3) * 0.9;
+      this.flameVel[i * 3 + 2] = speed;
+      this.flameLife[i] = 0.05 + Math.random() * 0.16 * (0.6 + intensity);
+      this.flameAge[i] = 0;
+      this.flameHeat[i] = 0.7 + Math.random() * 0.3;
+    }
+  }
+
+  updateFlames(dt) {
+    if (!this.flamePos) return;
+    const count = this.flameLife.length;
+    for (let i = 0; i < count; i++) {
+      if (this.flameAge[i] > this.flameLife[i]) {
+        this.flameCol[i * 3] = this.flameCol[i * 3 + 1] = this.flameCol[i * 3 + 2] = 0;
+        continue;
+      }
+      this.flameAge[i] += dt;
+      const k = this.flameAge[i] / this.flameLife[i];
+      this.flameVel[i * 3 + 1] += 1.2 * dt;          // hot gas rises
+      this.flamePos[i * 3] += this.flameVel[i * 3] * dt;
+      this.flamePos[i * 3 + 1] += this.flameVel[i * 3 + 1] * dt;
+      this.flamePos[i * 3 + 2] += this.flameVel[i * 3 + 2] * dt;
+      const fade = Math.max(0, 1 - k);
+      const h = this.flameHeat[i];
+      // white-yellow core -> orange -> deep red as it cools
+      this.flameCol[i * 3] = fade * 1.0;
+      this.flameCol[i * 3 + 1] = fade * (0.25 + 0.6 * h * (1 - k));
+      this.flameCol[i * 3 + 2] = fade * 0.25 * h * Math.max(0, 1 - 2.5 * k);
+    }
+    this.flameParticles.geometry.attributes.position.needsUpdate = true;
+    this.flameParticles.geometry.attributes.color.needsUpdate = true;
+  }
+
+  /** Legacy API (kept for debug bridge compatibility). */
   setRPM(targetRpm) {
     this.rpm = targetRpm;
-    this.isRevving = targetRpm > 0;
   }
 
   setExploded(factor) {
@@ -1109,61 +1249,88 @@ export class EngineModel {
     });
   }
 
-  update(delta) {
-    if (this.isRevving && this.rpm > 0) {
-      const radPerSec = (this.rpm * Math.PI * 2) / 60;
-      this.crankAngle += radPerSec * delta;
+  /**
+   * Drive every moving part from the physics model.
+   * @param {number} dt       simulated seconds this frame
+   * @param {EnginePhysics} phys
+   * @param {number} timeScale  simulation speed (1 = real time)
+   */
+  update(dt, phys, timeScale = 1) {
+    if (!phys) return;
+    const crank = phys.crankAngle;
+    this.crankAngle = crank;
+    this.rpm = phys.rpm;
+    const cycle = cycleDegFromCrank(crank);
 
-      if (this.crankshaft) {
-        this.crankshaft.rotation.z = this.crankAngle;
-      }
+    if (this.crankshaft) this.crankshaft.rotation.z = crank;
 
-      this.pistons.forEach((piston) => {
-        const theta = this.crankAngle + piston.phase;
-        const r = piston.crankRadius;
-        const l = piston.rodLength;
-
-        const s = r * Math.cos(theta) + Math.sqrt(l * l - r * r * Math.sin(theta) * Math.sin(theta));
-        piston.crown.position.y = s + 0.1;
-
-        const phi = Math.asin((r / l) * Math.sin(theta));
-        piston.conRod.position.y = s + 0.1;
-        piston.conRod.rotation.z = phi;
-      });
-
-      this.camshafts.forEach((cam) => {
-        cam.rotation.z = this.crankAngle * 0.5;
-      });
-
-      this.valves.forEach((valve, idx) => {
-        const camPhase = this.crankAngle * 0.5 + idx * 0.785;
-        const valveLift = Math.max(0, Math.sin(camPhase)) * 0.09;
-        valve.position.y = 0.3 - valveLift;
-      });
-
-      this.pulleys.forEach((p) => {
-        p.rotation.z = this.crankAngle * 0.8;
-      });
-
-      this.turbos.forEach((t) => {
-        t.wheel.rotation.z += radPerSec * delta * 4.0;
-      });
-
-      if (this.rpm > 3500) {
-        const heatPct = (this.rpm - 3500) / 5000;
-        this.matHeader.emissive.setHex(0xff3300);
-        this.matHeader.emissiveIntensity = heatPct * 2.2 * (0.85 + Math.sin(this.crankAngle * 4) * 0.15);
-
-        if (this.flameParticles) {
-          this.flameParticles.material.opacity = heatPct * (0.6 + Math.sin(this.crankAngle * 8) * 0.4);
-        }
-      } else {
-        this.matHeader.emissiveIntensity = 0;
-        if (this.flameParticles) {
-          this.flameParticles.material.opacity = 0;
-        }
-      }
+    // exact slider-crank: rod big end rides on the crank pin
+    for (let n = 0; n < this.pistons.length; n++) {
+      const piston = this.pistons[n];
+      const theta = cylinderTheta(piston.index, crank);
+      const r = piston.crankRadius;
+      const l = piston.rodLength;
+      const sPin = pistonTravel(theta, r, l);
+      piston.crown.position.y = sPin - 0.1;     // wrist pin sits 0.1 up in the crown
+      piston.conRod.position.y = sPin;
+      piston.conRod.rotation.z = Math.asin((r / l) * Math.sin(theta));
     }
+
+    // DOHC: cams at half crank speed, valves follow the lobe profile
+    const camRot = crank * 0.5;
+    for (let c = 0; c < this.camshafts.length; c++) this.camshafts[c].rotation.z = camRot;
+    const prof = this.camProfile;
+    for (let v = 0; v < this.valveMeta.length; v++) {
+      const vm = this.valveMeta[v];
+      const rel = cycle - FIRING_DEG[vm.cyl];
+      const lift = vm.exhaust ? valveLift(rel, prof.evo, prof.evc) : valveLift(rel, prof.ivo, prof.ivc);
+      vm.group.position.y = 0.3 - lift * prof.lift;
+    }
+
+    // accessory drive: each pulley turns at its belt ratio
+    for (let p = 0; p < this.pulleys.length; p++) {
+      const pl = this.pulleys[p];
+      pl.rotation.z = crank * (pl.userData.ratio || 1);
+    }
+
+    // turbo shafts (visual rate; real shaft speed is up to ~170k rpm)
+    this.turbos.forEach((t) => {
+      t.wheel.rotation.z += (t.isLeft ? 1 : -1) * phys.turboSpeed * 60 * dt;
+    });
+
+    // combustion glow per cylinder, from spark to exhaust valve opening
+    const spark = phys.sparkAdvance;
+    for (let i = 0; i < this.combustionFlashes.length; i++) {
+      const fl = this.combustionFlashes[i];
+      if (!fl) continue;
+      let glow = 0;
+      if (phys.combustion && !phys.cutFlags[i]) {
+        const since = wrap(cycle - (FIRING_DEG[i] - spark), 720);
+        if (since < prof.evo + spark) glow = since < 10 ? since / 10 : Math.exp(-(since - 10) / 45);
+        const realSince = (phys.time - phys.lastFireTime[i]) / Math.max(timeScale, 0.01);
+        glow = Math.max(glow, 0.75 * Math.exp(-realSince / 0.045));
+      }
+      const load = THREE.MathUtils.clamp(phys.map / 3.5, 0.15, 1);
+      fl.material.opacity = glow * (0.35 + 0.65 * load);
+      fl.material.color.setRGB(1, 0.35 + 0.35 * load, 0.08 + 0.25 * load * glow);
+      fl.visible = fl.material.opacity > 0.01;
+    }
+
+    // exhaust gas temperature -> stainless headers and turbine housings glow
+    const egt = phys.egt;
+    const hot = THREE.MathUtils.clamp((egt - 560) / 460, 0, 1);
+    this.matHeader.emissive.setRGB(1.0, 0.12 + 0.3 * hot, 0.02 * hot);
+    this.matHeader.emissiveIntensity = Math.pow(hot, 1.7) * 2.3;
+    const turbHot = THREE.MathUtils.clamp((egt - 650) / 420, 0, 1);
+    this.matTurboTurb.emissive.setRGB(1.0, 0.18 + 0.25 * turbHot, 0.02);
+    this.matTurboTurb.emissiveIntensity = Math.pow(turbHot, 1.6) * 1.8;
+
+    // continuous lean blue/orange flicker from the dumps at very high EGT under load
+    if (egt > 980 && phys.map > 2.5 && Math.random() < 0.25 * timeScale) {
+      this.spawnFlame(Math.random() < 0.5 ? 0 : 1, 0.15);
+    }
+
+    this.updateFlames(dt);
   }
 
   updateExplodedTransforms() {

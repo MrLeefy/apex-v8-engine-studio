@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { SoundEngine } from './soundEngine.js';
 import { EngineModel } from './engineModel.js';
 import { UIController } from './uiController.js';
+import { EnginePhysics } from './enginePhysics.js';
 import { ThreeDebugBridge } from './threeDebugBridge.js';
 
 /**
@@ -30,7 +31,12 @@ class App {
     // Subsystems
     this.sound = null;
     this.engine = null;
+    this.physics = null;
     this.ui = null;
+    this.timeScale = 1;
+    this.fps = 60;
+    this._fpsFrames = 0;
+    this._fpsTime = 0;
 
     // Interactive Raycaster for Engine Component Inspection
     this.raycaster = new THREE.Raycaster();
@@ -232,10 +238,20 @@ class App {
 
   initSubsystems() {
     this.sound = new SoundEngine();
+    this.physics = new EnginePhysics();
     this.engine = new EngineModel();
     this.scene.add(this.engine.group);
     this.ui = new UIController(this);
     this.debugBridge = new ThreeDebugBridge(this);
+    if (typeof window !== 'undefined') window.__PHYSICS__ = this.physics;
+
+    // Physics events -> acoustic + visual effects, synchronised per cylinder
+    this.physics.on('pop', (cyl, amp) => {
+      this.sound.pop(cyl, amp);
+      this.engine.spawnFlame(cyl < 4 ? 0 : 1, amp);
+    });
+    this.physics.on('bov', (amp) => this.sound.bov(amp));
+    this.physics.on('starter', (on) => { if (on) this.sound.solenoid(0.8); });
   }
 
   initEventListeners() {
@@ -295,22 +311,25 @@ class App {
     this.presetLerpProgress = 0;
 
     if (preset === 'isometric') {
-      this.camTargetPos.set(7.0, 4.2, 7.0);
+      this.camTargetPos.set(8.2, 4.8, 8.2);
       this.camLookAtTarget.set(0, 0.4, 0);
     } else if (preset === 'front') {
-      this.camTargetPos.set(0, 1.2, -6.5);
+      this.camTargetPos.set(0, 1.6, -10.5);
       this.camLookAtTarget.set(0, 0.5, 0);
     } else if (preset === 'top') {
-      this.camTargetPos.set(0, 8.5, 0.2);
+      this.camTargetPos.set(0, 12.5, 0.2);
       this.camLookAtTarget.set(0, 0.4, 0);
     } else if (preset === 'side') {
-      this.camTargetPos.set(-6.8, 1.5, 0.4);
+      this.camTargetPos.set(-10.5, 2.0, 0.6);
       this.camLookAtTarget.set(0, 0.4, 0);
+    } else if (preset === 'dyno') {
+      this.camTargetPos.set(-8.6, 3.4, 8.2);
+      this.camLookAtTarget.set(0, 0.1, 0.9);
     } else if (preset === 'macro') {
       this.camTargetPos.set(-2.2, 2.2, 1.8);
       this.camLookAtTarget.set(-1.0, 1.25, 0.45);
     } else if (preset === 'rear') {
-      this.camTargetPos.set(0, 1.2, 6.5);
+      this.camTargetPos.set(0, 1.6, 10.5);
       this.camLookAtTarget.set(0, 0.4, 0);
     }
   }
@@ -337,9 +356,23 @@ class App {
     requestAnimationFrame(() => this.animate());
 
     const delta = Math.min(this.clock.getDelta(), 0.1);
+    const simDelta = delta * this.timeScale;
+
+    this._fpsFrames++;
+    this._fpsTime += delta;
+    if (this._fpsTime > 0.5) {
+      this.fps = Math.round(this._fpsFrames / this._fpsTime);
+      this._fpsFrames = 0;
+      this._fpsTime = 0;
+    }
+
+    if (this.physics) {
+      this.physics.update(simDelta);
+      this.sound.update(this.physics, this.timeScale);
+    }
 
     if (this.engine) {
-      this.engine.update(delta);
+      this.engine.update(simDelta, this.physics, this.timeScale);
     }
 
     if (this.ui) {
@@ -348,11 +381,16 @@ class App {
 
     // Only lerp camera during preset transitions, then hand control back to user
     if (this.isAnimatingPreset) {
-      this.presetLerpProgress += delta * 3.0;
-      const t = Math.min(this.presetLerpProgress, 1.0);
-      this.camera.position.lerp(this.camTargetPos, t * 0.12);
-      this.controls.target.lerp(this.camLookAtTarget, t * 0.12);
-      if (this.presetLerpProgress >= 1.0) {
+      // frame-rate independent ease towards the preset
+      this.presetLerpProgress += delta;
+      const k = 1 - Math.exp(-delta * 5.5);
+      this.camera.position.lerp(this.camTargetPos, k);
+      this.controls.target.lerp(this.camLookAtTarget, k);
+      const done = this.camera.position.distanceTo(this.camTargetPos) < 0.01 &&
+        this.controls.target.distanceTo(this.camLookAtTarget) < 0.01;
+      if (done || this.presetLerpProgress > 2.5) {
+        this.camera.position.copy(this.camTargetPos);
+        this.controls.target.copy(this.camLookAtTarget);
         this.isAnimatingPreset = false;
       }
     }

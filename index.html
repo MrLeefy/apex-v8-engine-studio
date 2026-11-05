@@ -69,6 +69,7 @@
         <option value="side">Side Turbos & Headers</option>
         <option value="macro">Macro Piston Bore</option>
         <option value="rear">Rear Flywheel Drivetrain</option>
+        <option value="dyno">Dyno Cell 3/4 Rear (dump flames)</option>
       </select>
     </div>
 
@@ -112,15 +113,19 @@
         </div>
         <div class="spec-row">
           <span class="spec-k">COMPRESSION</span>
-          <span class="spec-v">9.8:1 Boost Ratio</span>
+          <span class="spec-v">9.8:1</span>
+        </div>
+        <div class="spec-row">
+          <span class="spec-k">FIRING ORDER</span>
+          <span class="spec-v" id="spec-firing-order">1-4-2-3-6-7-5-8</span>
         </div>
         <div class="spec-row">
           <span class="spec-k">PEAK POWER</span>
-          <span class="spec-v accent">1,150 HP @ 7,800 RPM</span>
+          <span class="spec-v accent">≈1,100 HP @ 8,000 RPM</span>
         </div>
         <div class="spec-row">
           <span class="spec-k">PEAK TORQUE</span>
-          <span class="spec-v accent">890 lb-ft @ 4,200 RPM</span>
+          <span class="spec-v accent">≈875 lb-ft @ 5,500 RPM</span>
         </div>
         <div class="spec-row">
           <span class="spec-k">BOOST PRESSURE</span>
@@ -128,7 +133,7 @@
         </div>
         <div class="spec-row">
           <span class="spec-k">REDLINE</span>
-          <span class="spec-v">8,500 RPM</span>
+          <span class="spec-v">8,500 RPM (cut 8,600)</span>
         </div>
       </div>
 
@@ -143,6 +148,20 @@
           <button class="rgb-dot" data-hex="0x9d4edd" style="background: #9d4edd;" title="Vapor Violet"></button>
           <button class="rgb-dot" data-hex="0xffb703" style="background: #ffb703;" title="Sunset Gold"></button>
         </div>
+      </div>
+    </div>
+
+    <!-- Dyno Pull Chart -->
+    <div class="hud-card glass-panel compact" id="dyno-chart-card">
+      <div class="card-header">
+        <span class="card-title">DYNO SHEET</span>
+        <span class="card-tag" id="dyno-chart-tag">NO RUN YET</span>
+      </div>
+      <canvas id="dyno-chart" width="600" height="300"></canvas>
+      <div class="chart-legend">
+        <span><i class="lg hp"></i>POWER (HP)</span>
+        <span><i class="lg tq"></i>TORQUE (LB-FT)</span>
+        <span><i class="lg bst"></i>BOOST</span>
       </div>
     </div>
 
@@ -179,50 +198,92 @@
       </div>
     </div>
 
-    <!-- Engine Dyno Telemetry Bench -->
+    <!-- Engine Control & Live Telemetry -->
     <div class="hud-card glass-panel dyno-hud" id="dyno-hud-card">
       <div class="card-header">
-        <span class="card-title">V8 DYNO LIVE TELEMETRY</span>
-        <span class="card-tag red" id="dyno-live-tag">IDLE • 850 RPM</span>
+        <span class="card-title">ENGINE CONTROL • LIVE ECU</span>
+        <span class="card-tag" id="dyno-live-tag">ENGINE OFF</span>
       </div>
 
       <div class="dyno-meter">
         <div class="rpm-display">
-          <span class="rpm-number" id="dyno-rpm">850</span>
+          <span class="rpm-number" id="dyno-rpm">0</span>
           <span class="rpm-unit">RPM</span>
         </div>
         <div class="dyno-bar-wrap">
-          <div class="dyno-bar-fill" id="dyno-rpm-bar" style="width: 10%;"></div>
+          <div class="dyno-bar-fill" id="dyno-rpm-bar" style="width: 0%;"></div>
+        </div>
+        <div class="mini-bars">
+          <div class="mini-bar"><span>THR</span><div class="mb-track"><div class="mb-fill thr" id="bar-throttle"></div></div></div>
+          <div class="mini-bar"><span>MAP</span><div class="mb-track"><div class="mb-fill map" id="bar-map"></div><div class="mb-atm"></div></div></div>
         </div>
       </div>
 
-      <div class="dyno-stats-grid">
-        <div class="d-stat">
-          <span class="d-label">HORSEPOWER</span>
-          <span class="d-val" id="dyno-hp">118 HP</span>
+      <div class="ignition-row">
+        <button class="btn-start" id="btn-start"><span class="start-dot"></span><span id="btn-start-label">START ENGINE</span></button>
+        <kbd>S</kbd>
+      </div>
+
+      <div class="dyno-stats-grid tri">
+        <div class="d-stat"><span class="d-label">POWER</span><span class="d-val" id="dyno-hp">0 HP</span></div>
+        <div class="d-stat"><span class="d-label">TORQUE</span><span class="d-val" id="dyno-tq">0 LB-FT</span></div>
+        <div class="d-stat"><span class="d-label">BOOST</span><span class="d-val" id="dyno-boost">0.00 BAR</span></div>
+        <div class="d-stat"><span class="d-label">AFR</span><span class="d-val" id="dyno-afr">--</span></div>
+        <div class="d-stat"><span class="d-label">IGNITION</span><span class="d-val" id="dyno-ign">--</span></div>
+        <div class="d-stat"><span class="d-label">TURBO SHAFT</span><span class="d-val" id="dyno-turbo">0 K</span></div>
+        <div class="d-stat"><span class="d-label">EGT</span><span class="d-val" id="dyno-egt">22 °C</span></div>
+        <div class="d-stat"><span class="d-label">OIL PRESS</span><span class="d-val" id="dyno-oilp">0 PSI</span></div>
+        <div class="d-stat"><span class="d-label">INJ DUTY</span><span class="d-val" id="dyno-inj">0 %</span></div>
+        <div class="d-stat"><span class="d-label">COOLANT</span><span class="d-val" id="dyno-coolant">42 °C</span></div>
+        <div class="d-stat"><span class="d-label">OIL TEMP</span><span class="d-val" id="dyno-oil">38 °C</span></div>
+        <div class="d-stat"><span class="d-label">ABSORBER</span><span class="d-val" id="dyno-absorber">OFF</span></div>
+      </div>
+
+      <div class="firing-strip">
+        <div class="fs-head">
+          <span>FIRING ORDER</span>
+          <span id="crank-angle-readout">CRANK 0°</span>
         </div>
-        <div class="d-stat">
-          <span class="d-label">TORQUE</span>
-          <span class="d-val" id="dyno-tq">195 LB-FT</span>
-        </div>
-        <div class="d-stat">
-          <span class="d-label">BOOST</span>
-          <span class="d-val" id="dyno-boost">0.0 BAR</span>
-        </div>
-        <div class="d-stat">
-          <span class="d-label">OIL TEMP</span>
-          <span class="d-val" id="dyno-oil">88 °C</span>
-        </div>
+        <div class="fs-leds" id="firing-leds"></div>
       </div>
 
       <div class="dyno-controls">
-        <label class="throttle-label">THROTTLE PEDAL (PULL TO REV)</label>
-        <input type="range" id="throttle-slider" min="800" max="8500" step="50" value="850" class="custom-range" />
+        <label class="throttle-label">HAND THROTTLE <span id="throttle-val">0%</span> <span class="hint">• HOLD SPACE = WOT • E = 35%</span></label>
+        <input type="range" id="throttle-slider" min="0" max="100" step="1" value="0" class="custom-range" />
       </div>
 
-      <div class="dyno-buttons" style="display: flex; gap: 8px; margin-top: 10px;">
-        <button class="btn-action accent" id="btn-nitrous" style="flex: 1; padding: 8px; font-size: 11px;">⚡ NITROUS SHOT (1150 HP)</button>
-        <button class="btn-action primary" id="btn-launch" style="flex: 1; padding: 8px; font-size: 11px;">🔥 2-STEP LAUNCH (4500 RPM)</button>
+      <div class="dyno-buttons">
+        <button class="btn-action primary" id="btn-dyno-pull" title="Automated WOT sweep 2,500 → 8,300 RPM on the water brake (D)">📈 DYNO PULL <kbd>D</kbd></button>
+        <button class="btn-action" id="btn-hold" title="Absorber holds the current RPM so you can load the engine (H)">⚓ HOLD RPM <kbd>H</kbd></button>
+        <button class="btn-action" id="btn-launch" title="2-step launch limiter at 4,500 RPM (L)">🔥 2-STEP <kbd>L</kbd></button>
+        <button class="btn-action accent" id="btn-nitrous" title="Hold for nitrous: needs >3,000 RPM and >85% throttle (N)">⚡ NITROUS <kbd>N</kbd></button>
+      </div>
+
+      <div class="option-grid">
+        <label>MIC
+          <select id="mic-select" class="custom-select">
+            <option value="tailpipe">Tailpipe</option>
+            <option value="bay">Engine Bay</option>
+            <option value="control">Control Room</option>
+          </select>
+        </label>
+        <label>CAM
+          <select id="cam-select" class="custom-select">
+            <option value="street">Street</option>
+            <option value="race">Race (lumpy)</option>
+          </select>
+        </label>
+        <label>SIM SPEED
+          <select id="timescale-select" class="custom-select">
+            <option value="1">1× real time</option>
+            <option value="0.25">0.25× slow-mo</option>
+            <option value="0.05">0.05× timing study</option>
+          </select>
+        </label>
+        <label>VOLUME
+          <input type="range" id="volume-slider" min="0" max="100" value="80" class="custom-range" />
+        </label>
+        <label class="check"><input type="checkbox" id="pops-toggle" checked /> POPS &amp; BANGS MAP</label>
       </div>
     </div>
   </aside>

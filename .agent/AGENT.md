@@ -7,8 +7,24 @@
   - `src/engineModel.js`: Parametric CAD model of the Twin-Turbo 5.0L 90° V8 engine with slider-crank kinematics, DOHC 32V valvetrain, symmetrical twin turbos, 4-into-1 headers, and tangential serpentine belt.
   - `src/textures.js`: In-memory procedural PBR textures (casting grain, 2x2 twill carbon fiber, brushed stainless steel, micro-V rubber belt, billet valve cover texturing).
   - `src/threeDebugBridge.js`: Runtime 3D scene inspection, measurement, collision detection, and performance diagnostic bridge.
-  - `src/soundEngine.js`: Web Audio acoustic engine synthesizing V8 exhaust pulses, turbo spool whine, and BOV flutter.
-  - `src/uiController.js`: Interactive HUD controller managing viewports, exploded view slider, ghost X-Ray mode, and dyno bench.
+  - `src/engineTiming.js`: Single source of truth for timing — cross-plane firing angles derived from the crank geometry (firing order 1-4-2-3-6-7-5-8, bank pattern L-R-L-L-R-L-R-R), slider-crank helpers, street/race cam events (EVO/EVC/IVO/IVC).
+  - `src/enginePhysics.js`: Real-time engine + dyno model integrated in 1 ms sub-steps: crank inertia, friction/pumping/compression torque, electronic throttle, filling/emptying manifold (MAP), twin-turbo shaft lag + wastegate + BOV, starter/fuel-prime/ECU sync/start flare/stall, idle air + idle spark control, rev limiter, 2-step, nitrous, overrun pops map, water-brake absorber (hold + automated sweep), EGT/coolant/oil thermal model. Emits `pop`, `bov`, `starter`, `stall`, `sweep`, `state` events.
+  - `src/audio/engineWorklet.js`: AudioWorklet synthesiser. Runs its own sample-accurate crank clock phase-locked to the physics and generates sound from per-cylinder events: exhaust blowdown at EVO per bank -> header waveguide -> turbine -> muffler waveguide, induction pulses, valve-seat ticks, cut/pop decisions from the ECU model, starter gear whine with compression-stroke speed modulation, twin turbo whistle (detuned pair), spool, BOV, wastegate, chain whine, fuel pump.
+  - `src/soundEngine.js`: Web Audio graph (worklet -> dry + dyno-cell convolution reverb -> limiter), mic positions (tailpipe / engine bay / control room).
+  - `src/uiController.js`: HUD: ignition, throttle (slider + keyboard), dyno pull/hold, 2-step, nitrous, cam, sim speed, live ECU telemetry, firing-order strip, dyno sheet chart, viewports, exploded view, X-Ray.
+
+### Driving the engine (keyboard)
+| Key | Action |
+|---|---|
+| `S` | Start (fuel prime -> crank -> catch) / stop |
+| `Space` / `W` / `↑` (hold) | Wide-open throttle |
+| `E` (hold) | 35 % throttle |
+| `D` | Automated dyno pull 2,500 -> 8,300 RPM |
+| `H` | Water brake holds the current RPM (load the engine, hear boost build) |
+| `L` | Arm 2-step launch limiter (4,500 RPM) |
+| `N` (hold) | Nitrous (>3,000 RPM, >85 % throttle) |
+
+Calibration (street cam, warm): idle ~820 RPM, full 2.5 bar boost by ~3,500 RPM with ~1.1 s turbo lag under load, idle -> 7,000 RPM free-rev in ~0.9 s, dyno pull ~1,100 HP / ~870 lb-ft.
 
 ---
 
@@ -36,6 +52,7 @@ When the app is running in the browser, the following hooks are available on `wi
 - `window.__CAMERA__`: Active perspective camera.
 - `window.__RENDERER__`: WebGLRenderer with tone mapping.
 - `window.__ENGINE__`: EngineModel instance.
+- `window.__PHYSICS__`: EnginePhysics instance (rpm, map, turboSpeed, egt, crankAngle, state...).
 - `window.__DEBUG_BRIDGE__`: ThreeDebugBridge instance with helper methods:
   - `list_scene_objects()`
   - `inspect_object(name)`
